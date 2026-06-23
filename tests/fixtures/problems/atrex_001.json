@@ -1,0 +1,5 @@
+{
+  "id": "atrex_001",
+  "prompt": "",
+  "pytorch": "import torch\nimport torch.nn as nn\n\n\nclass Model(nn.Module):\n    \"\"\"Element-wise ReLU activation.\"\"\"\n\n    def __init__(self):\n        super().__init__()\n\n    def forward(self, x: torch.Tensor) -> torch.Tensor:\n        return torch.relu(x)\n\n\ndef get_inputs() -> list[torch.Tensor]:\n    return [torch.randn(16, 16)]\n\n\ndef get_init_inputs() -> list:\n    return []\n"
+}

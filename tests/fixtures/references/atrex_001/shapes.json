@@ -1,0 +1,10 @@
+{
+  "0": {
+    "description": "16x16 random input for the test fixture (ReLU)",
+    "init_kwargs": null,
+    "input_kwargs": {
+      "rows": 16,
+      "cols": 16
+    }
+  }
+}

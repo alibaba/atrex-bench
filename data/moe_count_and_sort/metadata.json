@@ -1,0 +1,70 @@
+{
+  "id": "atrex_020",
+  "status": "trace_reference",
+  "dtype": "int32",
+  "input_dtypes": {
+    "topk_ids": "int32"
+  },
+  "output_dtypes": {
+    "sorted_token_ids": "int32",
+    "expert_token_counts": "int32",
+    "cumsum": "int32"
+  },
+  "origin": {
+    "framework": "vllm",
+    "symbol": "moe_count_and_sort_expert_tokens",
+    "module": "vllm::moe::count_and_sort_expert_tokens_kernel via vllm.moe_align_block_size"
+  },
+  "phase": "prefill/decode",
+  "importance_score": 0.004544,
+  "shapes": {
+    "0": {
+      "description": "(rtp-llm TP1), MoE routing count_and_sort, tokens=1 top_k=8 experts=128",
+      "source_framework": "rtp-llm",
+      "tensor_parallel_size": 1,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 12.82
+      }
+    },
+    "1": {
+      "description": "(vLLM TP4), MoE routing count_and_sort, tokens=76 top_k=8 experts=128",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 12.68
+      }
+    },
+    "2": {
+      "description": "(vLLM TP4), MoE routing count_and_sort, tokens=520 top_k=8 experts=128",
+      "shape_key": "(520,4096)",
+      "call_count": 94,
+      "total_duration_us": 510.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 16.61
+      }
+    },
+    "3": {
+      "description": "(vLLM TP4), MoE routing count_and_sort, tokens=1019 top_k=8 experts=128",
+      "shape_key": "(1019,4096)",
+      "call_count": 94,
+      "total_duration_us": 862.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 18.77
+      }
+    },
+    "4": {
+      "description": "(vLLM TP4), MoE routing count_and_sort, tokens=2044 top_k=8 experts=128",
+      "shape_key": "(2044,4096)",
+      "call_count": 94,
+      "total_duration_us": 1528.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 21.23
+      }
+    }
+  }
+}

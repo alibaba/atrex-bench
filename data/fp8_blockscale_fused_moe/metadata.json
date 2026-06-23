@@ -1,0 +1,81 @@
+{
+  "id": "atrex_006",
+  "status": "trace_reference",
+  "dtype": "fp8_e4m3",
+  "input_dtypes": {
+    "hidden_states": "bf16",
+    "w1": "fp8_e4m3",
+    "w2": "fp8_e4m3",
+    "topk_weights": "fp32",
+    "topk_ids": "int32",
+    "a_scale": "fp32",
+    "fc1_scale": "fp32",
+    "fc2_scale": "fp32"
+  },
+  "output_dtypes": {
+    "out": "bf16"
+  },
+  "origin": {
+    "framework": "aiter",
+    "symbol": "fmoe_fp8_blockscale_g1u1",
+    "module": "aiter.ops.moe_op"
+  },
+  "phase": "prefill/decode",
+  "importance_score": 0.051305,
+  "shapes": {
+    "0": {
+      "description": "(sglang TP1), FP8 block-scale MoE expert FFN, hidden_states=(30821,2048) 128 experts top-8",
+      "source_framework": "sglang",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 12622.29
+      }
+    },
+    "1": {
+      "description": "(sglang TP2), FP8 block-scale MoE expert FFN, hidden_states=(3804,7168) 256 experts top-8",
+      "source_framework": "sglang",
+      "call_count": 8358,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 13544.6
+      }
+    },
+    "2": {
+      "description": "(SGLang TP8), FP8 block-scale MoE expert FFN, grid_x=0",
+      "source_framework": "sglang",
+      "call_count": 16878,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 242.57
+      }
+    },
+    "3": {
+      "description": "(SGLang TP8), FP8 block-scale MoE expert FFN, grid_x=1",
+      "source_framework": "sglang",
+      "call_count": 58,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 2141.58
+      }
+    },
+    "4": {
+      "description": "(SGLang TP8), FP8 block-scale MoE expert FFN, grid_x=0",
+      "source_framework": "sglang",
+      "call_count": 1860,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 238.37
+      }
+    },
+    "5": {
+      "description": "(SGLang TP8), FP8 block-scale MoE expert FFN, grid_x=80",
+      "source_framework": "sglang",
+      "call_count": 360,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 4095.98
+      }
+    }
+  }
+}

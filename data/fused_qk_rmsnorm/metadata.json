@@ -1,0 +1,58 @@
+{
+  "id": "atrex_010",
+  "status": "trace_reference",
+  "dtype": "fp16",
+  "input_dtypes": {
+    "hidden_states": "fp16",
+    "q_weight": "fp16",
+    "k_weight": "fp16"
+  },
+  "output_dtypes": {
+    "out": "fp16"
+  },
+  "origin": {
+    "framework": "rtp-llm",
+    "symbol": "fusedQkRmsNorm",
+    "module": "rtp_llm.cpp.kernels.rocm.fused_qk_rmsnorm"
+  },
+  "phase": "prefill/decode",
+  "importance_score": 0.018695,
+  "shapes": {
+    "0": {
+      "description": "(rtp-llm TP1), text decoder fused QK RMSNorm, heads=64/8 head_dim=128",
+      "source_framework": "rtp-llm",
+      "tensor_parallel_size": 1,
+      "production_performance": {
+        "framework": "rtp",
+        "performance_us": 7.7
+      }
+    },
+    "1": {
+      "description": "(rtp-llm TP1), text decoder fused QK RMSNorm, heads=32/8 head_dim=128",
+      "source_framework": "rtp-llm",
+      "tensor_parallel_size": 1,
+      "production_performance": {
+        "framework": "rtp",
+        "performance_us": 7.75
+      }
+    },
+    "3": {
+      "description": "(rtp-llm TP2), text decoder fused QK RMSNorm, heads=32/4 head_dim=128",
+      "source_framework": "rtp-llm",
+      "tensor_parallel_size": 2,
+      "production_performance": {
+        "framework": "rtp",
+        "performance_us": 7.75
+      }
+    },
+    "4": {
+      "description": "(rtp-llm TP1), text decoder fused QK RMSNorm, heads=40/8 head_dim=128",
+      "source_framework": "rtp-llm",
+      "tensor_parallel_size": 1,
+      "production_performance": {
+        "framework": "rtp",
+        "performance_us": 7.74
+      }
+    }
+  }
+}

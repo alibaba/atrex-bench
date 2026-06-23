@@ -1,0 +1,90 @@
+{
+  "0": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "shape": [
+        1,
+        4,
+        128
+      ],
+      "block_size": 16
+    }
+  },
+  "1": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "shape": [
+        144,
+        2,
+        256
+      ],
+      "block_size": 16
+    }
+  },
+  "2": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "shape": [
+        248,
+        16,
+        128
+      ],
+      "block_size": 16
+    }
+  },
+  "3": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "shape": [
+        520,
+        16,
+        128
+      ],
+      "block_size": 16
+    }
+  },
+  "4": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "shape": [
+        1015,
+        16,
+        128
+      ],
+      "block_size": 16
+    }
+  },
+  "5": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "shape": [
+        2044,
+        16,
+        128
+      ],
+      "block_size": 16
+    }
+  },
+  "6": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "shape": [
+        4108,
+        4,
+        128
+      ],
+      "block_size": 16
+    }
+  },
+  "7": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "shape": [
+        8192,
+        4,
+        128
+      ],
+      "block_size": 16
+    }
+  }
+}

@@ -1,0 +1,137 @@
+{
+  "id": "atrex_015",
+  "status": "trace_reference",
+  "dtype": "bf16",
+  "input_dtypes": {
+    "x": "bf16"
+  },
+  "output_dtypes": {
+    "out": "bf16"
+  },
+  "origin": {
+    "framework": "vllm",
+    "symbol": "l2norm_fwd",
+    "module": "vllm.model_executor.layers.fla.ops.l2norm"
+  },
+  "phase": "prefill/decode",
+  "importance_score": 0.004661,
+  "shapes": {
+    "0": {
+      "description": "(vLLM TP1), L2 norm, tokens=1 hidden=2048",
+      "source_framework": "vllm",
+      "call_count": 1,
+      "production_performance": {
+        "framework": "rtp",
+        "performance_us": 7.57
+      }
+    },
+    "1": {
+      "description": "(vLLM TP1), L2 norm, tokens=128 hidden=2048",
+      "source_framework": "vllm",
+      "call_count": 120,
+      "production_performance": {
+        "framework": "rtp",
+        "performance_us": 7.74
+      }
+    },
+    "2": {
+      "description": "(vLLM TP1), L2 norm, tokens=256 hidden=2048",
+      "source_framework": "vllm",
+      "call_count": 126,
+      "production_performance": {
+        "framework": "rtp",
+        "performance_us": 7.89
+      }
+    },
+    "3": {
+      "description": "(vLLM TP1), L2 norm, tokens=480 hidden=2048",
+      "source_framework": "vllm",
+      "call_count": 30,
+      "production_performance": {
+        "framework": "rtp",
+        "performance_us": 8.97
+      }
+    },
+    "4": {
+      "description": "(vLLM TP1), L2 norm, tokens=2304 hidden=2048",
+      "source_framework": "vllm",
+      "call_count": 300,
+      "production_performance": {
+        "framework": "rtp",
+        "performance_us": 21.46
+      }
+    },
+    "5": {
+      "description": "(vLLM TP1), L2 norm, tokens=4064 hidden=2048",
+      "source_framework": "vllm",
+      "call_count": 42,
+      "production_performance": {
+        "framework": "rtp",
+        "performance_us": 30.04
+      }
+    },
+    "6": {
+      "description": "(vLLM TP1), L2 norm, tokens=8736 hidden=2048",
+      "source_framework": "vllm",
+      "call_count": 42,
+      "production_performance": {
+        "framework": "rtp",
+        "performance_us": 59.02
+      }
+    },
+    "7": {
+      "description": "(vLLM TP1), L2 norm, tokens=16608 hidden=2048",
+      "source_framework": "vllm",
+      "call_count": 42,
+      "production_performance": {
+        "framework": "rtp",
+        "performance_us": 117.24
+      }
+    },
+    "8": {
+      "description": "(vLLM TP1), L2 norm, tokens=24480 hidden=2048",
+      "source_framework": "vllm",
+      "call_count": 42,
+      "production_performance": {
+        "framework": "rtp",
+        "performance_us": 173.26
+      }
+    },
+    "9": {
+      "description": "(vLLM TP1), L2 norm, tokens=48704 hidden=2048",
+      "source_framework": "vllm",
+      "call_count": 42,
+      "production_performance": {
+        "framework": "rtp",
+        "performance_us": 315.9
+      }
+    },
+    "10": {
+      "description": "(vLLM TP1), L2 norm, tokens=65792 hidden=2048",
+      "source_framework": "vllm",
+      "call_count": 42,
+      "production_performance": {
+        "framework": "rtp",
+        "performance_us": 430.04
+      }
+    },
+    "11": {
+      "description": "(vLLM TP1), L2 norm, tokens=98880 hidden=2048",
+      "source_framework": "vllm",
+      "call_count": 42,
+      "production_performance": {
+        "framework": "rtp",
+        "performance_us": 635.04
+      }
+    },
+    "12": {
+      "description": "(vLLM TP1), L2 norm, tokens=131072 hidden=2048",
+      "source_framework": "vllm",
+      "call_count": 42,
+      "production_performance": {
+        "framework": "rtp",
+        "performance_us": 853.06
+      }
+    }
+  }
+}

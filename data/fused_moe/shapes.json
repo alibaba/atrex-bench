@@ -1,0 +1,324 @@
+{
+  "0": {
+    "init_kwargs": {
+      "num_experts": 8,
+      "intermediate_size": 2048,
+      "top_k": 2
+    },
+    "input_kwargs": {
+      "token_count": 135,
+      "hidden_size": 2048,
+      "intermediate_size": 2048,
+      "num_experts": 8,
+      "top_k": 2
+    }
+  },
+  "1": {
+    "init_kwargs": {
+      "num_experts": 8,
+      "intermediate_size": 2048,
+      "top_k": 2
+    },
+    "input_kwargs": {
+      "token_count": 277,
+      "hidden_size": 2048,
+      "intermediate_size": 2048,
+      "num_experts": 8,
+      "top_k": 2
+    }
+  },
+  "2": {
+    "init_kwargs": {
+      "num_experts": 8,
+      "intermediate_size": 2048,
+      "top_k": 2
+    },
+    "input_kwargs": {
+      "token_count": 668,
+      "hidden_size": 2048,
+      "intermediate_size": 2048,
+      "num_experts": 8,
+      "top_k": 2
+    }
+  },
+  "3": {
+    "init_kwargs": {
+      "num_experts": 8,
+      "intermediate_size": 2048,
+      "top_k": 2
+    },
+    "input_kwargs": {
+      "token_count": 1023,
+      "hidden_size": 2048,
+      "intermediate_size": 2048,
+      "num_experts": 8,
+      "top_k": 2
+    }
+  },
+  "4": {
+    "init_kwargs": {
+      "num_experts": 8,
+      "intermediate_size": 2048,
+      "top_k": 2
+    },
+    "input_kwargs": {
+      "token_count": 1979,
+      "hidden_size": 2048,
+      "intermediate_size": 2048,
+      "num_experts": 8,
+      "top_k": 2
+    }
+  },
+  "5": {
+    "init_kwargs": {
+      "num_experts": 8,
+      "intermediate_size": 2048,
+      "top_k": 2
+    },
+    "input_kwargs": {
+      "token_count": 4195,
+      "hidden_size": 2048,
+      "intermediate_size": 2048,
+      "num_experts": 8,
+      "top_k": 2
+    }
+  },
+  "6": {
+    "init_kwargs": {
+      "num_experts": 8,
+      "intermediate_size": 2048,
+      "top_k": 2
+    },
+    "input_kwargs": {
+      "token_count": 7689,
+      "hidden_size": 2048,
+      "intermediate_size": 2048,
+      "num_experts": 8,
+      "top_k": 2
+    }
+  },
+  "7": {
+    "init_kwargs": {
+      "num_experts": 8,
+      "intermediate_size": 2048,
+      "top_k": 2
+    },
+    "input_kwargs": {
+      "token_count": 15809,
+      "hidden_size": 2048,
+      "intermediate_size": 2048,
+      "num_experts": 8,
+      "top_k": 2
+    }
+  },
+  "8": {
+    "init_kwargs": {
+      "num_experts": 128,
+      "intermediate_size": 768,
+      "top_k": 8
+    },
+    "input_kwargs": {
+      "token_count": 1,
+      "hidden_size": 2048,
+      "intermediate_size": 768,
+      "num_experts": 128,
+      "top_k": 8
+    }
+  },
+  "9": {
+    "init_kwargs": {
+      "num_experts": 128,
+      "intermediate_size": 768,
+      "top_k": 8
+    },
+    "input_kwargs": {
+      "token_count": 2400,
+      "hidden_size": 2048,
+      "intermediate_size": 768,
+      "num_experts": 128,
+      "top_k": 8
+    }
+  },
+  "10": {
+    "init_kwargs": {
+      "num_experts": 128,
+      "intermediate_size": 768,
+      "top_k": 8
+    },
+    "input_kwargs": {
+      "token_count": 4195,
+      "hidden_size": 2048,
+      "intermediate_size": 768,
+      "num_experts": 128,
+      "top_k": 8
+    }
+  },
+  "11": {
+    "init_kwargs": {
+      "num_experts": 128,
+      "intermediate_size": 768,
+      "top_k": 8
+    },
+    "input_kwargs": {
+      "token_count": 8192,
+      "hidden_size": 2048,
+      "intermediate_size": 768,
+      "num_experts": 128,
+      "top_k": 8
+    }
+  },
+  "12": {
+    "init_kwargs": {
+      "num_experts": 128,
+      "intermediate_size": 768,
+      "top_k": 8
+    },
+    "input_kwargs": {
+      "token_count": 15809,
+      "hidden_size": 2048,
+      "intermediate_size": 768,
+      "num_experts": 128,
+      "top_k": 8
+    }
+  },
+  "13": {
+    "init_kwargs": {
+      "num_experts": 128,
+      "intermediate_size": 768,
+      "top_k": 8
+    },
+    "input_kwargs": {
+      "token_count": 25632,
+      "hidden_size": 2048,
+      "intermediate_size": 768,
+      "num_experts": 128,
+      "top_k": 8
+    }
+  },
+  "14": {
+    "init_kwargs": {
+      "num_experts": 128,
+      "intermediate_size": 768,
+      "top_k": 8
+    },
+    "input_kwargs": {
+      "token_count": 45936,
+      "hidden_size": 2048,
+      "intermediate_size": 768,
+      "num_experts": 128,
+      "top_k": 8
+    }
+  },
+  "15": {
+    "init_kwargs": {
+      "num_experts": 128,
+      "intermediate_size": 384,
+      "top_k": 8
+    },
+    "input_kwargs": {
+      "token_count": 520,
+      "hidden_size": 4096,
+      "intermediate_size": 384,
+      "num_experts": 128,
+      "top_k": 8
+    }
+  },
+  "16": {
+    "init_kwargs": {
+      "num_experts": 128,
+      "intermediate_size": 384,
+      "top_k": 8
+    },
+    "input_kwargs": {
+      "token_count": 1019,
+      "hidden_size": 4096,
+      "intermediate_size": 384,
+      "num_experts": 128,
+      "top_k": 8
+    }
+  },
+  "17": {
+    "init_kwargs": {
+      "num_experts": 128,
+      "intermediate_size": 384,
+      "top_k": 8
+    },
+    "input_kwargs": {
+      "token_count": 2044,
+      "hidden_size": 4096,
+      "intermediate_size": 384,
+      "num_experts": 128,
+      "top_k": 8
+    }
+  },
+  "18": {
+    "init_kwargs": {
+      "num_experts": 128,
+      "intermediate_size": 384,
+      "top_k": 8
+    },
+    "input_kwargs": {
+      "token_count": 3936,
+      "hidden_size": 4096,
+      "intermediate_size": 384,
+      "num_experts": 128,
+      "top_k": 8
+    }
+  },
+  "19": {
+    "init_kwargs": {
+      "num_experts": 128,
+      "intermediate_size": 384,
+      "top_k": 8
+    },
+    "input_kwargs": {
+      "token_count": 8192,
+      "hidden_size": 4096,
+      "intermediate_size": 384,
+      "num_experts": 128,
+      "top_k": 8
+    }
+  },
+  "20": {
+    "init_kwargs": {
+      "num_experts": 8,
+      "intermediate_size": 4096,
+      "top_k": 2
+    },
+    "input_kwargs": {
+      "token_count": 4098,
+      "hidden_size": 4096,
+      "intermediate_size": 4096,
+      "num_experts": 8,
+      "top_k": 2
+    }
+  },
+  "21": {
+    "init_kwargs": {
+      "num_experts": 8,
+      "intermediate_size": 4096,
+      "top_k": 2
+    },
+    "input_kwargs": {
+      "token_count": 8179,
+      "hidden_size": 4096,
+      "intermediate_size": 4096,
+      "num_experts": 8,
+      "top_k": 2
+    }
+  },
+  "22": {
+    "init_kwargs": {
+      "num_experts": 8,
+      "intermediate_size": 4096,
+      "top_k": 2
+    },
+    "input_kwargs": {
+      "token_count": 15381,
+      "hidden_size": 4096,
+      "intermediate_size": 4096,
+      "num_experts": 8,
+      "top_k": 2
+    }
+  }
+}

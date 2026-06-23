@@ -1,0 +1,79 @@
+{
+  "0": {
+    "init_kwargs": {
+      "eps": 1e-06,
+      "norm_before_gate": true,
+      "activation": "silu"
+    },
+    "input_kwargs": {
+      "rows": 352864,
+      "hidden_size": 128
+    }
+  },
+  "1": {
+    "init_kwargs": {
+      "eps": 1e-06,
+      "norm_before_gate": true,
+      "activation": "silu"
+    },
+    "input_kwargs": {
+      "rows": 192960,
+      "hidden_size": 128
+    }
+  },
+  "2": {
+    "init_kwargs": {
+      "eps": 1e-06,
+      "norm_before_gate": true,
+      "activation": "silu"
+    },
+    "input_kwargs": {
+      "rows": 191456,
+      "hidden_size": 128
+    }
+  },
+  "3": {
+    "init_kwargs": {
+      "eps": 1e-06,
+      "norm_before_gate": true,
+      "activation": "silu"
+    },
+    "input_kwargs": {
+      "rows": 161376,
+      "hidden_size": 128
+    }
+  },
+  "4": {
+    "init_kwargs": {
+      "eps": 1e-06,
+      "norm_before_gate": true,
+      "activation": "silu"
+    },
+    "input_kwargs": {
+      "rows": 159872,
+      "hidden_size": 128
+    }
+  },
+  "5": {
+    "init_kwargs": {
+      "eps": 1e-06,
+      "norm_before_gate": true,
+      "activation": "silu"
+    },
+    "input_kwargs": {
+      "rows": 139616,
+      "hidden_size": 128
+    }
+  },
+  "6": {
+    "init_kwargs": {
+      "eps": 1e-06,
+      "norm_before_gate": true,
+      "activation": "silu"
+    },
+    "input_kwargs": {
+      "rows": 134240,
+      "hidden_size": 128
+    }
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "0": {
+    "init_kwargs": {
+      "num_experts": 128,
+      "intermediate_size": 768,
+      "top_k": 8
+    },
+    "input_kwargs": {
+      "token_count": 30821,
+      "hidden_size": 2048,
+      "intermediate_size": 768,
+      "num_experts": 128,
+      "top_k": 8
+    }
+  },
+  "1": {
+    "init_kwargs": {
+      "num_experts": 256,
+      "intermediate_size": 2048,
+      "top_k": 8
+    },
+    "input_kwargs": {
+      "token_count": 3804,
+      "hidden_size": 7168,
+      "intermediate_size": 2048,
+      "num_experts": 256,
+      "top_k": 8
+    }
+  },
+  "2": {
+    "init_kwargs": {
+      "num_experts": 256,
+      "intermediate_size": 2048,
+      "top_k": 8
+    },
+    "input_kwargs": {
+      "token_count": 1,
+      "hidden_size": 7168,
+      "intermediate_size": 2048,
+      "num_experts": 256,
+      "top_k": 8
+    }
+  },
+  "3": {
+    "init_kwargs": {
+      "num_experts": 256,
+      "intermediate_size": 2048,
+      "top_k": 8
+    },
+    "input_kwargs": {
+      "token_count": 32,
+      "hidden_size": 7168,
+      "intermediate_size": 2048,
+      "num_experts": 256,
+      "top_k": 8
+    }
+  },
+  "4": {
+    "init_kwargs": {
+      "num_experts": 128,
+      "intermediate_size": 1536,
+      "top_k": 8
+    },
+    "input_kwargs": {
+      "token_count": 1,
+      "hidden_size": 4096,
+      "intermediate_size": 1536,
+      "num_experts": 128,
+      "top_k": 8
+    }
+  },
+  "5": {
+    "init_kwargs": {
+      "num_experts": 128,
+      "intermediate_size": 1536,
+      "top_k": 8
+    },
+    "input_kwargs": {
+      "token_count": 2560,
+      "hidden_size": 4096,
+      "intermediate_size": 1536,
+      "num_experts": 128,
+      "top_k": 8
+    }
+  }
+}

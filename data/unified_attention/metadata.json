@@ -1,0 +1,255 @@
+{
+  "id": "atrex_031",
+  "status": "curated",
+  "dtype": "bf16",
+  "input_dtypes": {
+    "q": "bf16",
+    "k_cache": "bf16",
+    "v_cache": "bf16",
+    "cu_seqlens_q": "int32",
+    "seqused_k": "int32",
+    "block_table": "int32"
+  },
+  "output_dtypes": {
+    "out": "fp32"
+  },
+  "origin": {
+    "framework": "vllm",
+    "symbol": "unified_attention",
+    "module": "vllm.v1.attention.ops.triton_unified_attention"
+  },
+  "importance_score": 0.394972,
+  "phase": "prefill/decode",
+  "shapes": {
+    "0": {
+      "description": "(vLLM TP4), prefill paged attention, seqs=130 heads=10/1 head_dim=128",
+      "source_framework": "vllm",
+      "call_count": 12,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 1292.2
+      }
+    },
+    "1": {
+      "description": "(vLLM TP4), prefill paged attention, seqs=290 heads=10/1 head_dim=128",
+      "source_framework": "vllm",
+      "call_count": 12,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 2893.5
+      }
+    },
+    "2": {
+      "description": "(vLLM TP4), prefill paged attention, seqs=484 heads=10/1 head_dim=128",
+      "source_framework": "vllm",
+      "call_count": 12,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 4689.42
+      }
+    },
+    "3": {
+      "description": "(vLLM TP4), prefill paged attention, seqs=1 heads=16/1 head_dim=128",
+      "source_framework": "vllm",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 24.8
+      }
+    },
+    "4": {
+      "description": "(SGLang), causal attention, seq_len=1688 heads=16/16 head_dim=192",
+      "origin_kernel": "flash_attention",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 1126.72
+      }
+    },
+    "5": {
+      "description": "(vLLM), causal attention, seq_len=11840 heads=16/16 head_dim=72",
+      "origin_kernel": "flash_attention",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 38609.73
+      }
+    },
+    "6": {
+      "description": "(rtp-llm), causal attention, seq_len=24752 heads=16/16 head_dim=80",
+      "origin_kernel": "flash_attention",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 70572.83
+      }
+    },
+    "7": {
+      "description": "(vLLM), causal attention, seq_len=1144 heads=16/2 head_dim=128",
+      "origin_kernel": "flash_attention",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 258.27
+      }
+    },
+    "8": {
+      "description": "(vLLM), causal attention, seq_len=875 heads=16/2 head_dim=256",
+      "origin_kernel": "flash_attention",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 413.17
+      }
+    },
+    "9": {
+      "description": "(vLLM TP1), prefill paged attention, seqs=324 heads=16/4 head_dim=128",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 5037.07
+      }
+    },
+    "10": {
+      "description": "(vLLM TP1), prefill paged attention, seqs=699 heads=16/4 head_dim=128",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 10834.22
+      }
+    },
+    "11": {
+      "description": "(vLLM TP1), prefill paged attention, seqs=1032 heads=16/4 head_dim=128",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 16042.89
+      }
+    },
+    "12": {
+      "description": "(vLLM TP1), prefill paged attention, seqs=1882 heads=16/4 head_dim=128",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 29361.38
+      }
+    },
+    "13": {
+      "description": "(vLLM TP1), prefill paged attention, seqs=3095 heads=16/4 head_dim=128",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 48595.17
+      }
+    },
+    "14": {
+      "description": "(vLLM), causal attention, seq_len=72 heads=16/4 head_dim=256",
+      "origin_kernel": "flash_attention",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 72.25
+      }
+    },
+    "15": {
+      "description": "(vLLM), causal attention, seq_len=7 heads=20/20 head_dim=64",
+      "origin_kernel": "flash_attention",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 18.46
+      }
+    },
+    "16": {
+      "description": "(vLLM TP1), prefill paged attention, seqs=18 heads=28/4 head_dim=128",
+      "source_framework": "vllm",
+      "call_count": 28,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 518.65
+      }
+    },
+    "17": {
+      "description": "(vLLM TP1), prefill paged attention, seqs=118 heads=28/4 head_dim=128",
+      "source_framework": "vllm",
+      "call_count": 28,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 3222.03
+      }
+    },
+    "18": {
+      "description": "(vLLM TP1), prefill paged attention, seqs=1192 heads=28/4 head_dim=128",
+      "source_framework": "vllm",
+      "call_count": 28,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 32450.71
+      }
+    },
+    "19": {
+      "description": "(vLLM TP1), prefill paged attention, seqs=2056 heads=28/4 head_dim=128",
+      "source_framework": "vllm",
+      "call_count": 28,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 56166.02
+      }
+    },
+    "20": {
+      "description": "(vLLM TP1), prefill paged attention, seqs=1 heads=32/4 head_dim=128",
+      "shape_key": "(6294,32,128)",
+      "source_kernel_name": "kernel_unified_attention_2d",
+      "source_framework": "vllm",
+      "call_count": 864,
+      "total_duration_us": 6600057.0,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 9737.46
+      }
+    },
+    "21": {
+      "description": "(vLLM TP1), prefill paged attention, seqs=1 heads=32/8 head_dim=128",
+      "shape_key": "(2018,32,128)",
+      "source_kernel_name": "kernel_unified_attention_2d",
+      "source_framework": "vllm",
+      "call_count": 108,
+      "total_duration_us": 153990.0,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 1179.54
+      }
+    },
+    "22": {
+      "description": "(vLLM), causal attention, seq_len=49152 heads=4/4 head_dim=72",
+      "origin_kernel": "flash_attention",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 160946.59
+      }
+    },
+    "23": {
+      "description": "(vLLM), causal attention, seq_len=145 heads=40/8 head_dim=128",
+      "origin_kernel": "flash_attention",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 43.68
+      }
+    },
+    "24": {
+      "description": "(SGLang), causal attention, seq_len=5926 heads=8/1 head_dim=256",
+      "origin_kernel": "flash_attention",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 5684.42
+      }
+    }
+  }
+}

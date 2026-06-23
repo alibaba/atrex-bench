@@ -1,0 +1,99 @@
+{
+  "id": "atrex_014",
+  "status": "trace_reference",
+  "dtype": "bf16",
+  "input_dtypes": {
+    "x": "bf16",
+    "weight": "bf16",
+    "z": "bf16"
+  },
+  "output_dtypes": {
+    "out": "bf16"
+  },
+  "origin": {
+    "framework": "sglang",
+    "symbol": "rms_norm_gated",
+    "module": "sglang.srt.layers.attention.fla.layernorm_gated"
+  },
+  "importance_score": 0.004735,
+  "phase": "prefill/decode",
+  "shapes": {
+    "0": {
+      "description": "(SGLang), gated RMSNorm, rows=352864 hidden=128",
+      "shape_key": "(352864,128)",
+      "call_count": 30,
+      "total_duration_us": 5724.0,
+      "source_framework": "sglang",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 248.73
+      }
+    },
+    "1": {
+      "description": "(SGLang), gated RMSNorm, rows=192960 hidden=128",
+      "shape_key": "(192960,128)",
+      "call_count": 30,
+      "total_duration_us": 3138.0,
+      "source_framework": "sglang",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 141.11
+      }
+    },
+    "2": {
+      "description": "(SGLang), gated RMSNorm, rows=191456 hidden=128",
+      "shape_key": "(191456,128)",
+      "call_count": 30,
+      "total_duration_us": 3116.0,
+      "source_framework": "sglang",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 140.04
+      }
+    },
+    "3": {
+      "description": "(SGLang), gated RMSNorm, rows=161376 hidden=128",
+      "shape_key": "(161376,128)",
+      "call_count": 30,
+      "total_duration_us": 2643.0,
+      "source_framework": "sglang",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 119.72
+      }
+    },
+    "4": {
+      "description": "(SGLang), gated RMSNorm, rows=159872 hidden=128",
+      "shape_key": "(159872,128)",
+      "call_count": 30,
+      "total_duration_us": 2615.0,
+      "source_framework": "sglang",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 118.72
+      }
+    },
+    "5": {
+      "description": "(SGLang), gated RMSNorm, rows=139616 hidden=128",
+      "shape_key": "(139616,128)",
+      "call_count": 30,
+      "total_duration_us": 2299.0,
+      "source_framework": "sglang",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 104.38
+      }
+    },
+    "6": {
+      "description": "(SGLang), gated RMSNorm, rows=134240 hidden=128",
+      "shape_key": "(134240,128)",
+      "call_count": 30,
+      "total_duration_us": 2214.0,
+      "source_framework": "sglang",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 100.02
+      }
+    }
+  }
+}

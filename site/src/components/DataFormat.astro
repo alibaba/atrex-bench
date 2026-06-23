@@ -1,0 +1,63 @@
+---
+---
+
+<div class="page-section">
+  <div class="page-container">
+    <div class="card mb-8">
+      <pre class="text-sm text-gray-400 font-mono leading-relaxed"><code>data/&lt;source&gt;/&lt;operator_name&gt;/
+├── reference.py     <span class="text-brand-400"># class Model(nn.Module)</span>
+├── input.py         <span class="text-brand-400"># _make_inputs(**kwargs) -> dict[str, Tensor]</span>
+├── shapes.json      <span class="text-brand-400"># shape spec (dict keyed by id)</span>
+├── metadata.json    <span class="text-brand-400"># id / dtype / origin (not visible to agent)</span>
+└── roofline.json    <span class="text-brand-400"># W / Q / SOL_time (not visible to agent)</span></code></pre>
+    </div>
+
+    <h2 class="section-heading" data-i18n="dataformat.visibility">Visibility Layers</h2>
+    <div class="card overflow-hidden p-0">
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-gray-800 bg-gray-900/50">
+              <th class="text-left py-3 px-4 text-gray-400 font-medium" data-i18n="dataformat.file">File</th>
+              <th class="text-left py-3 px-4 text-gray-400 font-medium" data-i18n="dataformat.role">Role</th>
+              <th class="text-center py-3 px-4 text-gray-400 font-medium" data-i18n="dataformat.agent">Agent Visible</th>
+              <th class="text-center py-3 px-4 text-gray-400 font-medium" data-i18n="dataformat.release">In Release</th>
+            </tr>
+          </thead>
+          <tbody class="text-gray-300">
+            <tr class="border-b border-gray-800/30">
+              <td class="py-3 px-4 font-mono text-xs text-white">reference.py</td>
+              <td class="py-3 px-4 text-sm" data-i18n="dataformat.ref.role">PyTorch reference (class Model)</td>
+              <td class="py-3 px-4 text-center text-green-400">&#x2713;</td>
+              <td class="py-3 px-4 text-center text-green-400">&#x2713;</td>
+            </tr>
+            <tr class="border-b border-gray-800/30">
+              <td class="py-3 px-4 font-mono text-xs text-white">input.py</td>
+              <td class="py-3 px-4 text-sm" data-i18n="dataformat.input.role">Input constructor (_make_inputs)</td>
+              <td class="py-3 px-4 text-center text-green-400">&#x2713;</td>
+              <td class="py-3 px-4 text-center text-green-400">&#x2713;</td>
+            </tr>
+            <tr class="border-b border-gray-800/30">
+              <td class="py-3 px-4 font-mono text-xs text-white">shapes.json</td>
+              <td class="py-3 px-4 text-sm" data-i18n="dataformat.shapes.role">Shape specifications (init + input kwargs)</td>
+              <td class="py-3 px-4 text-center text-green-400">&#x2713;</td>
+              <td class="py-3 px-4 text-center text-green-400">&#x2713;</td>
+            </tr>
+            <tr class="border-b border-gray-800/30">
+              <td class="py-3 px-4 font-mono text-xs text-white">metadata.json</td>
+              <td class="py-3 px-4 text-sm" data-i18n="dataformat.meta.role">Operator identity + upstream provenance</td>
+              <td class="py-3 px-4 text-center text-red-400">&#x2717;</td>
+              <td class="py-3 px-4 text-center text-green-400">&#x2713;</td>
+            </tr>
+            <tr>
+              <td class="py-3 px-4 font-mono text-xs text-white">roofline.json</td>
+              <td class="py-3 px-4 text-sm" data-i18n="dataformat.roof.role">Roofline estimates (W / Q / SOL_time)</td>
+              <td class="py-3 px-4 text-center text-red-400">&#x2717;</td>
+              <td class="py-3 px-4 text-center text-green-400">&#x2713;</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>

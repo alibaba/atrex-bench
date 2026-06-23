@@ -1,0 +1,226 @@
+{
+  "0": {
+    "init_kwargs": {
+      "chunk_size": 64
+    },
+    "input_kwargs": {
+      "token_count": 64,
+      "num_v_heads": 32,
+      "value_dim": 128,
+      "num_q_heads": 16,
+      "chunk_size": 64,
+      "key_dim": 128,
+      "batch_size": 1
+    }
+  },
+  "1": {
+    "init_kwargs": {
+      "chunk_size": 64
+    },
+    "input_kwargs": {
+      "token_count": 128,
+      "num_v_heads": 32,
+      "value_dim": 128,
+      "num_q_heads": 16,
+      "chunk_size": 64,
+      "key_dim": 128,
+      "batch_size": 1
+    }
+  },
+  "2": {
+    "init_kwargs": {
+      "chunk_size": 64
+    },
+    "input_kwargs": {
+      "token_count": 256,
+      "num_v_heads": 32,
+      "value_dim": 128,
+      "num_q_heads": 16,
+      "chunk_size": 64,
+      "key_dim": 128,
+      "batch_size": 1
+    }
+  },
+  "3": {
+    "init_kwargs": {
+      "chunk_size": 64
+    },
+    "input_kwargs": {
+      "token_count": 512,
+      "num_v_heads": 32,
+      "value_dim": 128,
+      "num_q_heads": 16,
+      "chunk_size": 64,
+      "key_dim": 128,
+      "batch_size": 1
+    }
+  },
+  "4": {
+    "init_kwargs": {
+      "chunk_size": 64
+    },
+    "input_kwargs": {
+      "token_count": 1024,
+      "num_v_heads": 32,
+      "value_dim": 128,
+      "num_q_heads": 16,
+      "chunk_size": 64,
+      "key_dim": 128,
+      "batch_size": 1
+    }
+  },
+  "5": {
+    "init_kwargs": {
+      "chunk_size": 64
+    },
+    "input_kwargs": {
+      "token_count": 2048,
+      "num_v_heads": 32,
+      "value_dim": 128,
+      "num_q_heads": 16,
+      "chunk_size": 64,
+      "key_dim": 128,
+      "batch_size": 1
+    }
+  },
+  "6": {
+    "init_kwargs": {
+      "chunk_size": 64
+    },
+    "input_kwargs": {
+      "token_count": 4096,
+      "num_v_heads": 32,
+      "value_dim": 128,
+      "num_q_heads": 16,
+      "chunk_size": 64,
+      "key_dim": 128,
+      "batch_size": 1
+    }
+  },
+  "7": {
+    "init_kwargs": {
+      "chunk_size": 64
+    },
+    "input_kwargs": {
+      "token_count": 8192,
+      "num_v_heads": 32,
+      "value_dim": 128,
+      "num_q_heads": 16,
+      "chunk_size": 64,
+      "key_dim": 128,
+      "batch_size": 1
+    }
+  },
+  "8": {
+    "init_kwargs": {
+      "chunk_size": 64
+    },
+    "input_kwargs": {
+      "token_count": 704,
+      "num_v_heads": 16,
+      "value_dim": 128,
+      "num_q_heads": 8,
+      "chunk_size": 64,
+      "key_dim": 128,
+      "batch_size": 1
+    }
+  },
+  "9": {
+    "init_kwargs": {
+      "chunk_size": 64
+    },
+    "input_kwargs": {
+      "token_count": 1024,
+      "num_v_heads": 16,
+      "value_dim": 128,
+      "num_q_heads": 8,
+      "chunk_size": 64,
+      "key_dim": 128,
+      "batch_size": 1
+    }
+  },
+  "10": {
+    "init_kwargs": {
+      "chunk_size": 64
+    },
+    "input_kwargs": {
+      "token_count": 2112,
+      "num_v_heads": 16,
+      "value_dim": 128,
+      "num_q_heads": 8,
+      "chunk_size": 64,
+      "key_dim": 128,
+      "batch_size": 1
+    }
+  },
+  "11": {
+    "init_kwargs": {
+      "chunk_size": 64
+    },
+    "input_kwargs": {
+      "token_count": 4096,
+      "num_v_heads": 16,
+      "value_dim": 128,
+      "num_q_heads": 8,
+      "chunk_size": 64,
+      "key_dim": 128,
+      "batch_size": 1
+    }
+  },
+  "12": {
+    "init_kwargs": {
+      "chunk_size": 64
+    },
+    "input_kwargs": {
+      "token_count": 8256,
+      "num_v_heads": 16,
+      "value_dim": 128,
+      "num_q_heads": 8,
+      "chunk_size": 64,
+      "key_dim": 128,
+      "batch_size": 1
+    }
+  },
+  "13": {
+    "init_kwargs": {
+      "chunk_size": 64
+    },
+    "input_kwargs": {
+      "batch_size": 1,
+      "token_count": 4195,
+      "num_q_heads": 16,
+      "num_v_heads": 32,
+      "key_dim": 128,
+      "value_dim": 128,
+      "chunk_size": 64
+    }
+  },
+  "14": {
+    "init_kwargs": {
+      "chunk_size": 64
+    },
+    "input_kwargs": {
+      "batch_size": 1,
+      "token_count": 11027,
+      "num_q_heads": 16,
+      "num_v_heads": 32,
+      "key_dim": 128,
+      "value_dim": 128,
+      "chunk_size": 64
+    }
+  },
+  "15": {
+    "init_kwargs": {
+      "chunk_size": 64
+    },
+    "input_kwargs": {
+      "batch_size": 1,
+      "token_count": 14807,
+      "num_q_heads": 16,
+      "num_v_heads": 32,
+      "key_dim": 128,
+      "value_dim": 128,
+      "chunk_size": 64
+    }
+  }
+}

@@ -1,0 +1,249 @@
+{
+  "id": "atrex_001",
+  "status": "trace_reference",
+  "dtype": "bf16",
+  "input_dtypes": {
+    "q": "bf16",
+    "k": "bf16",
+    "v": "bf16",
+    "cu_seqlens_q": "int32",
+    "cu_seqlens_k": "int32"
+  },
+  "output_dtypes": {
+    "out": "bf16"
+  },
+  "origin": {
+    "framework": "vllm",
+    "symbol": "attention_forward_varlen",
+    "module": "ck_tile FmhaFwdKernel / attn_fwd raw trace"
+  },
+  "phase": "prefill",
+  "importance_score": 0.022438,
+  "shapes": {
+    "0": {
+      "description": "(vLLM TP1), prefill attention forward, q/k/v=(720,16,72)",
+      "shape_key": "(720,16,72)",
+      "source_kernel_name": "_ZN7ck_tile6kentryILi256ELi2ENS_13FmhaFwdKernelINS_28BlockFmhaPipelineQRKSVSAsyncINS_24BlockFmhaPipelineProblemItttffthftftNS_1",
+      "source_framework": "vllm",
+      "call_count": 54,
+      "total_duration_us": 4563.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 68.37
+      }
+    },
+    "1": {
+      "description": "(vLLM TP1), prefill attention forward, q/k/v=(1200,16,72)",
+      "shape_key": "(1200,16,72)",
+      "source_kernel_name": "_ZN7ck_tile6kentryILi256ELi2ENS_13FmhaFwdKernelINS_28BlockFmhaPipelineQRKSVSAsyncINS_24BlockFmhaPipelineProblemItttffthftftNS_1",
+      "source_framework": "vllm",
+      "call_count": 54,
+      "total_duration_us": 7041.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 108.12
+      }
+    },
+    "2": {
+      "description": "(vLLM TP4), prefill attention forward, q/k/v=(2116,16,72)",
+      "shape_key": "(2116,16,72)",
+      "source_kernel_name": "_ZN7ck_tile6kentryILi256ELi2ENS_13FmhaFwdKernelINS_28BlockFmhaPipelineQRKSVSAsyncINS_24BlockFmhaPipelineProblemItttffthftftNS_1",
+      "source_framework": "vllm",
+      "call_count": 27,
+      "total_duration_us": 10814.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 332.73
+      }
+    },
+    "3": {
+      "description": "(vLLM TP1), prefill attention forward, q/k/v=(3844,16,72)",
+      "shape_key": "(3844,16,72)",
+      "source_kernel_name": "_ZN7ck_tile6kentryILi256ELi2ENS_13FmhaFwdKernelINS_28BlockFmhaPipelineQRKSVSAsyncINS_24BlockFmhaPipelineProblemItttffthftftNS_1",
+      "source_framework": "vllm",
+      "call_count": 27,
+      "total_duration_us": 33250.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 1017.97
+      }
+    },
+    "4": {
+      "description": "(vLLM TP4), prefill attention forward, q/k/v=(8136,16,72)",
+      "shape_key": "(8136,16,72)",
+      "source_kernel_name": "_ZN7ck_tile6kentryILi256ELi2ENS_13FmhaFwdKernelINS_28BlockFmhaPipelineQRKSVSAsyncINS_24BlockFmhaPipelineProblemItttffthftftNS_1",
+      "source_framework": "vllm",
+      "call_count": 54,
+      "total_duration_us": 91864.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 3791.05
+      }
+    },
+    "5": {
+      "description": "(vLLM TP1), prefill attention forward, q/k/v=(17296,16,72)",
+      "shape_key": "(17296,16,72)",
+      "source_kernel_name": "_ZN7ck_tile6kentryILi256ELi2ENS_13FmhaFwdKernelINS_28BlockFmhaPipelineQRKSVSAsyncINS_24BlockFmhaPipelineProblemItttffthftftNS_1",
+      "source_framework": "vllm",
+      "call_count": 27,
+      "total_duration_us": 102172.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 17072.56
+      }
+    },
+    "6": {
+      "description": "(vLLM TP1), prefill attention forward, q/k/v=(24368,16,72)",
+      "shape_key": "(24368,16,72)",
+      "source_kernel_name": "_ZN7ck_tile6kentryINS_6gfx9_tELi2ENS_13FmhaFwdKernelINS_28BlockFmhaPipelineQRKSVSAsyncINS_24BlockFmhaPipelineProblemIDF16bDF16b",
+      "source_framework": "vllm",
+      "call_count": 27,
+      "total_duration_us": 102783.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 33271.93
+      }
+    },
+    "7": {
+      "description": "(vLLM TP1), prefill attention forward, q/k/v=(49596,16,72)",
+      "shape_key": "(49596,16,72)",
+      "source_kernel_name": "_ZN7ck_tile6kentryINS_6gfx9_tELi2ENS_13FmhaFwdKernelINS_28BlockFmhaPipelineQRKSVSAsyncINS_24BlockFmhaPipelineProblemIDF16bDF16b",
+      "source_framework": "vllm",
+      "call_count": 27,
+      "total_duration_us": 185168.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 134507.1
+      }
+    },
+    "8": {
+      "description": "(vLLM TP1), prefill attention forward, q/k/v=(65556,16,72)",
+      "shape_key": "(65556,16,72)",
+      "source_kernel_name": "_ZN7ck_tile6kentryINS_6gfx9_tELi2ENS_13FmhaFwdKernelINS_28BlockFmhaPipelineQRKSVSAsyncINS_24BlockFmhaPipelineProblemIDF16bDF16b",
+      "source_framework": "vllm",
+      "call_count": 27,
+      "total_duration_us": 386276.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 237709.9
+      }
+    },
+    "9": {
+      "description": "(vLLM TP1), prefill attention forward, q/k/v=(16742,32,128)",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 37320.4
+      }
+    },
+    "10": {
+      "description": "(vLLM TP1), prefill attention forward, q/k/v=(30793,32,128)",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 124192.76
+      }
+    },
+    "11": {
+      "description": "(vLLM TP4), prefill attention forward, q/k/v=(276,4,72)",
+      "shape_key": "(276,4,72)",
+      "call_count": 27,
+      "total_duration_us": 963.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 43.21
+      }
+    },
+    "12": {
+      "description": "(vLLM TP4), prefill attention forward, q/k/v=(600,4,72)",
+      "shape_key": "(600,4,72)",
+      "call_count": 54,
+      "total_duration_us": 2890.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 47.4
+      }
+    },
+    "13": {
+      "description": "(vLLM TP4), prefill attention forward, q/k/v=(1012,4,72)",
+      "shape_key": "(1012,4,72)",
+      "call_count": 27,
+      "total_duration_us": 2105.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 56.98
+      }
+    },
+    "14": {
+      "description": "(vLLM TP4), prefill attention forward, q/k/v=(2024,4,72)",
+      "shape_key": "(2024,4,72)",
+      "call_count": 81,
+      "total_duration_us": 11631.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 105.53
+      }
+    },
+    "15": {
+      "description": "(vLLM TP4), prefill attention forward, q/k/v=(4100,4,72)",
+      "shape_key": "(4100,4,72)",
+      "call_count": 54,
+      "total_duration_us": 19859.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 308.66
+      }
+    },
+    "16": {
+      "description": "(vLLM TP4), prefill attention forward, q/k/v=(8184,4,72)",
+      "shape_key": "(8184,4,72)",
+      "call_count": 27,
+      "total_duration_us": 37357.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 1173.57
+      }
+    },
+    "17": {
+      "description": "(vLLM TP4), prefill attention forward, q/k/v=(15476,4,72)",
+      "shape_key": "(15476,4,72)",
+      "call_count": 27,
+      "total_duration_us": 49272.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 3746.66
+      }
+    },
+    "18": {
+      "description": "(vLLM TP4), prefill attention forward, q/k/v=(24952,4,72)",
+      "shape_key": "(24952,4,72)",
+      "call_count": 27,
+      "total_duration_us": 65268.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 8545.95
+      }
+    },
+    "19": {
+      "description": "(vLLM TP4), prefill attention forward, q/k/v=(40560,4,72)",
+      "shape_key": "(40560,4,72)",
+      "call_count": 27,
+      "total_duration_us": 713207.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 21902.82
+      }
+    },
+    "20": {
+      "description": "(rtp-llm TP1), prefill attention forward, q/k/v=(1,8,128)",
+      "source_framework": "rtp-llm",
+      "tensor_parallel_size": 1,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 14.42
+      }
+    }
+  }
+}

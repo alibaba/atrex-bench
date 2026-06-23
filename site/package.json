@@ -1,0 +1,17 @@
+{
+  "name": "atrex-bench-site",
+  "type": "module",
+  "version": "0.0.1",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "extract-data": "python3 scripts/extract-data.py"
+  },
+  "dependencies": {
+    "astro": "^5.8.0",
+    "@astrojs/tailwind": "^6.0.2",
+    "tailwindcss": "^3.4.17",
+    "chart.js": "^4.4.9"
+  }
+}

@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+
+# Evaluation outputs
+results/
+output/
+outputs/
+
+# Triton cache
+.triton/
+
+# PyTorch compile cache
+torch_compile_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Coverage
+.coverage
+htmlcov/
+
+# Site
+site/node_modules/
+site/dist/
+site/.astro/
+site/src/data/operators.json
+site/package-lock.json

@@ -1,0 +1,82 @@
+---
+import Layout from '../layouts/Layout.astro';
+import PageHeader from '../components/PageHeader.astro';
+import OperatorCatalog from '../components/OperatorCatalog.astro';
+import OperatorChart from '../components/OperatorChart.astro';
+import RooflineDetail from '../components/RooflineDetail.astro';
+import ShapeView from '../components/ShapeView.astro';
+---
+
+<Layout title="Data — Atrex-Bench">
+  <PageHeader
+    titleKey="data.page.title"
+    titleFallback="Benchmark Data"
+    subtitleKey="data.page.subtitle"
+    subtitleFallback="30 production operators with 447 hot shapes, importance weights from 1,303 production profiles, roofline bounds across 3 hardware platforms, and deployed kernel baselines."
+  />
+
+  <!-- Tab switcher -->
+  <div class="page-container pt-8">
+    <div class="flex gap-1 border-b border-gray-800">
+      <button id="tab-general" class="tab-btn tab-active px-5 py-2.5 text-sm font-medium rounded-t-lg transition-colors">
+        General View
+      </button>
+      <button id="tab-hardware" class="tab-btn px-5 py-2.5 text-sm font-medium rounded-t-lg transition-colors">
+        Hardware View
+      </button>
+      <button id="tab-shape" class="tab-btn px-5 py-2.5 text-sm font-medium rounded-t-lg transition-colors">
+        Shape View
+      </button>
+    </div>
+  </div>
+
+  <!-- General View -->
+  <div id="panel-general">
+    <OperatorCatalog />
+    <OperatorChart />
+  </div>
+
+  <!-- Hardware View -->
+  <div id="panel-hardware" class="hidden">
+    <RooflineDetail />
+  </div>
+
+  <!-- Shape View -->
+  <div id="panel-shape" class="hidden">
+    <ShapeView />
+  </div>
+</Layout>
+
+<style>
+  .tab-btn {
+    color: rgb(156 163 175);
+    border-bottom: 2px solid transparent;
+  }
+  .tab-btn:hover {
+    color: rgb(255 255 255);
+  }
+  .tab-active {
+    color: rgb(255 255 255) !important;
+    border-bottom-color: rgb(15 118 110) !important;
+    background: rgb(17 24 39 / 0.5);
+  }
+</style>
+
+<script>
+  const tabs = ['general', 'hardware', 'shape'] as const;
+  type Tab = typeof tabs[number];
+
+  const tabEls = Object.fromEntries(tabs.map(t => [t, document.getElementById(`tab-${t}`)!]));
+  const panelEls = Object.fromEntries(tabs.map(t => [t, document.getElementById(`panel-${t}`)!]));
+
+  function switchTab(active: Tab) {
+    for (const t of tabs) {
+      panelEls[t].classList.toggle('hidden', t !== active);
+      tabEls[t].classList.toggle('tab-active', t === active);
+    }
+  }
+
+  for (const t of tabs) {
+    tabEls[t].addEventListener('click', () => switchTab(t));
+  }
+</script>

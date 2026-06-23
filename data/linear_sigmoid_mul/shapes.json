@@ -1,0 +1,74 @@
+{
+  "0": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 8037,
+      "hidden_size": 4096,
+      "out_features": 4096
+    }
+  },
+  "1": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 6717,
+      "hidden_size": 4096,
+      "out_features": 4096
+    }
+  },
+  "2": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 4001,
+      "hidden_size": 4096,
+      "out_features": 4096
+    }
+  },
+  "3": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 15381,
+      "hidden_size": 4096,
+      "out_features": 4096
+    }
+  },
+  "4": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 6576,
+      "hidden_size": 4096,
+      "out_features": 4096
+    }
+  },
+  "5": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 1,
+      "hidden_size": 2048,
+      "out_features": 4096
+    }
+  },
+  "6": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 90,
+      "hidden_size": 2048,
+      "out_features": 4096
+    }
+  },
+  "7": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 13,
+      "hidden_size": 2048,
+      "out_features": 4096
+    }
+  },
+  "8": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 2748,
+      "hidden_size": 4096,
+      "out_features": 4096
+    }
+  }
+}

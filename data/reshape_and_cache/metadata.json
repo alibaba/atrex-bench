@@ -1,0 +1,101 @@
+{
+  "id": "atrex_026",
+  "status": "trace_reference",
+  "dtype": "bf16",
+  "input_dtypes": {
+    "key": "bf16",
+    "value": "bf16",
+    "key_cache": "bf16",
+    "value_cache": "bf16",
+    "slot_mapping": "int64"
+  },
+  "output_dtypes": {
+    "key_cache": "bf16",
+    "value_cache": "bf16"
+  },
+  "origin": {
+    "framework": "vllm",
+    "symbol": "reshape_and_cache_flash",
+    "module": "vllm._C_cache_ops.reshape_and_cache_flash"
+  },
+  "phase": "prefill/decode",
+  "importance_score": 0.043524,
+  "shapes": {
+    "0": {
+      "description": "(vLLM TP1), KV cache reshape_and_cache, shape=(1,4,128)",
+      "source_framework": "vllm",
+      "call_count": 6580,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 7.48
+      }
+    },
+    "1": {
+      "description": "(vLLM TP1), KV cache reshape_and_cache, shape=(144,2,256)",
+      "source_framework": "vllm",
+      "call_count": 60,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 7.68
+      }
+    },
+    "2": {
+      "description": "(vLLM TP4), KV cache reshape_and_cache, shape=(248,16,128)",
+      "shape_key": "(248,16,128)",
+      "call_count": 94,
+      "total_duration_us": 445.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 9.8
+      }
+    },
+    "3": {
+      "description": "(vLLM TP4), KV cache reshape_and_cache, shape=(520,16,128)",
+      "shape_key": "(520,16,128)",
+      "call_count": 94,
+      "total_duration_us": 435.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 14.24
+      }
+    },
+    "4": {
+      "description": "(vLLM TP4), KV cache reshape_and_cache, shape=(1015,16,128)",
+      "shape_key": "(1015,16,128)",
+      "call_count": 94,
+      "total_duration_us": 623.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 21.19
+      }
+    },
+    "5": {
+      "description": "(vLLM TP4), KV cache reshape_and_cache, shape=(2044,16,128)",
+      "shape_key": "(2044,16,128)",
+      "call_count": 94,
+      "total_duration_us": 870.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 29.22
+      }
+    },
+    "6": {
+      "description": "(vLLM TP1), KV cache reshape_and_cache, shape=(4108,4,128)",
+      "source_framework": "vllm",
+      "call_count": 28,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 33.7
+      }
+    },
+    "7": {
+      "description": "(vLLM TP1), KV cache reshape_and_cache, shape=(8192,4,128)",
+      "source_framework": "vllm",
+      "call_count": 28,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 60.29
+      }
+    }
+  }
+}

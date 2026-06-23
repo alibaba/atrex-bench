@@ -1,0 +1,142 @@
+{
+  "0": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 1,
+      "hidden_size": 2048
+    }
+  },
+  "1": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 608,
+      "hidden_size": 2048
+    }
+  },
+  "2": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 865,
+      "hidden_size": 2048
+    }
+  },
+  "3": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 2032,
+      "hidden_size": 2048
+    }
+  },
+  "4": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 4144,
+      "hidden_size": 2048
+    }
+  },
+  "5": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 6920,
+      "hidden_size": 2048
+    }
+  },
+  "6": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 16256,
+      "hidden_size": 2048
+    }
+  },
+  "7": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 24712,
+      "hidden_size": 2048
+    }
+  },
+  "8": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 45568,
+      "hidden_size": 2048
+    }
+  },
+  "10": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 1,
+      "hidden_size": 4096
+    }
+  },
+  "11": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 127,
+      "hidden_size": 4096
+    }
+  },
+  "12": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 255,
+      "hidden_size": 4096
+    }
+  },
+  "13": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 513,
+      "hidden_size": 4096
+    }
+  },
+  "14": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 1029,
+      "hidden_size": 4096
+    }
+  },
+  "15": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 2041,
+      "hidden_size": 4096
+    }
+  },
+  "16": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 4104,
+      "hidden_size": 4096
+    }
+  },
+  "17": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 8208,
+      "hidden_size": 4096
+    }
+  },
+  "18": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 1,
+      "hidden_size": 5120
+    }
+  },
+  "19": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 1688,
+      "hidden_size": 7168
+    }
+  },
+  "20": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 3804,
+      "hidden_size": 7168
+    }
+  }
+}

@@ -1,0 +1,146 @@
+{
+  "id": "atrex_016",
+  "status": "trace_reference",
+  "dtype": "bf16",
+  "input_dtypes": {
+    "x": "bf16"
+  },
+  "output_dtypes": {
+    "out": "bf16"
+  },
+  "origin": {
+    "framework": "vllm",
+    "symbol": "layer_norm",
+    "module": "vllm"
+  },
+  "phase": "prefill/decode",
+  "importance_score": 0.000773,
+  "shapes": {
+    "0": {
+      "description": "(vLLM TP4), shape=(276,1,1152)",
+      "shape_key": "(276,1,1152)",
+      "call_count": 54,
+      "total_duration_us": 414.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 8.94
+      }
+    },
+    "1": {
+      "description": "(vLLM TP4), shape=(600,1,1152)",
+      "shape_key": "(600,1,1152)",
+      "call_count": 108,
+      "total_duration_us": 1002.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 9.95
+      }
+    },
+    "2": {
+      "description": "(vLLM TP4), shape=(1012,1,1152)",
+      "shape_key": "(1012,1,1152)",
+      "call_count": 54,
+      "total_duration_us": 727.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 12.07
+      }
+    },
+    "3": {
+      "description": "(vLLM TP4), shape=(2024,1,1152)",
+      "shape_key": "(2024,1,1152)",
+      "call_count": 162,
+      "total_duration_us": 3390.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 15.79
+      }
+    },
+    "4": {
+      "description": "(vLLM TP4), shape=(4100,1,1152)",
+      "shape_key": "(4100,1,1152)",
+      "call_count": 108,
+      "total_duration_us": 3543.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 23.29
+      }
+    },
+    "5": {
+      "description": "(vLLM TP4), shape=(8184,1,1152)",
+      "shape_key": "(8184,1,1152)",
+      "call_count": 54,
+      "total_duration_us": 3313.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 37.96
+      }
+    },
+    "6": {
+      "description": "(vLLM TP4), shape=(15476,1,1152)",
+      "shape_key": "(15476,1,1152)",
+      "call_count": 54,
+      "total_duration_us": 6063.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 63.95
+      }
+    },
+    "7": {
+      "description": "(vLLM TP4), shape=(24952,1,1152)",
+      "shape_key": "(24952,1,1152)",
+      "call_count": 54,
+      "total_duration_us": 9650.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 97.52
+      }
+    },
+    "8": {
+      "description": "(vLLM TP4), shape=(40560,1,1152)",
+      "shape_key": "(40560,1,1152)",
+      "call_count": 54,
+      "total_duration_us": 15746.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 152.15
+      }
+    },
+    "9": {
+      "description": "(SGLang TP1), LayerNorm, tokens=91192 hidden=2048",
+      "source_framework": "sglang",
+      "call_count": 30,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 788.42
+      }
+    },
+    "10": {
+      "description": "(rtp-llm TP1), shape=(1,2048)",
+      "source_framework": "rtp-llm",
+      "tensor_parallel_size": 1,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 7.59
+      }
+    },
+    "11": {
+      "description": "(rtp-llm TP1), shape=(1,4096)",
+      "source_framework": "rtp-llm",
+      "tensor_parallel_size": 1,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 8.07
+      }
+    },
+    "12": {
+      "description": "(rtp-llm TP1), shape=(1,5120)",
+      "source_framework": "rtp-llm",
+      "tensor_parallel_size": 1,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 8.91
+      }
+    }
+  }
+}

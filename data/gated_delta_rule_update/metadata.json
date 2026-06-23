@@ -1,0 +1,182 @@
+{
+  "id": "atrex_013",
+  "status": "trace_reference",
+  "dtype": "bf16",
+  "input_dtypes": {
+    "A_log": "fp32",
+    "a": "bf16",
+    "dt_bias": "bf16",
+    "q": "bf16",
+    "k": "bf16",
+    "v": "bf16",
+    "b": "bf16",
+    "initial_state": "fp32",
+    "initial_state_indices": "int32"
+  },
+  "output_dtypes": {
+    "out": "bf16",
+    "final_state": "fp32"
+  },
+  "origin": {
+    "framework": "sglang/vllm",
+    "symbol": "fused_sigmoid_gating_delta_rule_update",
+    "module": "sglang.srt.layers.attention.fla.fused_sigmoid_gating_recurrent"
+  },
+  "phase": "decode",
+  "importance_score": 0.034959,
+  "shapes": {
+    "0": {
+      "description": "(SGLang TP1), gated delta rule update, tokens=1 heads=16/32 dim=128/128",
+      "source_framework": "sglang",
+      "call_count": 6180,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 9.56
+      }
+    },
+    "1": {
+      "description": "(vLLM TP1), gated delta rule update, tokens=128 heads=16/32 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 42,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 295.57
+      }
+    },
+    "2": {
+      "description": "(vLLM TP1), gated delta rule update, tokens=258 heads=16/32 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 21,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 584.79
+      }
+    },
+    "3": {
+      "description": "(vLLM TP1), gated delta rule update, tokens=544 heads=16/32 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 21,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 1226.59
+      }
+    },
+    "4": {
+      "description": "(vLLM TP1), gated delta rule update, tokens=1033 heads=16/32 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 21,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 2312.74
+      }
+    },
+    "5": {
+      "description": "(vLLM TP1), gated delta rule update, tokens=2051 heads=16/32 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 21,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 4635.05
+      }
+    },
+    "6": {
+      "description": "(vLLM TP1), gated delta rule update, tokens=4120 heads=16/32 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 21,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 9673.89
+      }
+    },
+    "7": {
+      "description": "(vLLM TP1), gated delta rule update, tokens=8192 heads=16/32 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 147,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 20104.76
+      }
+    },
+    "8": {
+      "description": "(vLLM TP4), gated delta rule update, tokens=1 heads=4/8 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 1728,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 8.9
+      }
+    },
+    "9": {
+      "description": "(SGLang TP8), gated delta rule update, tokens=1 heads=8/16 dim=128/128",
+      "source_framework": "sglang",
+      "call_count": 1395,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 8.69
+      }
+    },
+    "10": {
+      "description": "(SGLang TP8), gated delta rule update, tokens=129 heads=8/16 dim=128/128",
+      "source_framework": "sglang",
+      "call_count": 45,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 288.98
+      }
+    },
+    "12": {
+      "description": "(SGLang), gated delta rule update, tokens=130 heads=16/32 dim=128/128",
+      "origin_kernel": "gdn_gating",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 295.59
+      }
+    },
+    "13": {
+      "description": "(vLLM), gated delta rule update, tokens=256 heads=16/32 dim=128/128",
+      "origin_kernel": "gdn_gating",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 574.58
+      }
+    },
+    "14": {
+      "description": "(SGLang), gated delta rule update, tokens=512 heads=16/32 dim=128/128",
+      "origin_kernel": "gdn_gating",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 1143.63
+      }
+    },
+    "15": {
+      "description": "(SGLang), gated delta rule update, tokens=1029 heads=16/32 dim=128/128",
+      "origin_kernel": "gdn_gating",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 2288.57
+      }
+    },
+    "16": {
+      "description": "(SGLang), gated delta rule update, tokens=1831 heads=16/32 dim=128/128",
+      "origin_kernel": "gdn_gating",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 4065.1
+      }
+    },
+    "17": {
+      "description": "(SGLang), gated delta rule update, tokens=3251 heads=16/32 dim=128/128",
+      "origin_kernel": "gdn_gating",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 7234.1
+      }
+    }
+  }
+}

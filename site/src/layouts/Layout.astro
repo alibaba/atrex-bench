@@ -1,0 +1,80 @@
+---
+import '../styles/global.css';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+
+interface Props {
+  title: string;
+  description?: string;
+}
+
+const { title, description = 'Atrex-Bench: End-to-End Operator Generation Benchmark for Multiple DSLs' } = Astro.props;
+const currentPath = Astro.url.pathname.replace(/\/$/, '') || '/';
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content={description} />
+    <link rel="icon" type="image/svg+xml" href={`${import.meta.env.BASE_URL.replace(/\/$/, '')}/favicon.svg`} />
+    <title>{title}</title>
+  </head>
+  <body>
+    <Nav currentPath={currentPath} />
+    <div class="pt-16">
+      <slot />
+    </div>
+    <Footer />
+    <script>
+      import en from '../i18n/en.json';
+
+      const translations: Record<string, Record<string, string>> = { en };
+
+      function getLang(): string {
+        return localStorage.getItem('atrex-lang') || 'en';
+      }
+
+      function setLang(lang: string) {
+        localStorage.setItem('atrex-lang', lang);
+        applyTranslations(lang);
+        document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+        document.querySelectorAll('[data-lang-btn]').forEach(btn => {
+          const el = btn as HTMLElement;
+          el.classList.toggle('text-white', el.dataset.langBtn === lang);
+          el.classList.toggle('text-gray-500', el.dataset.langBtn !== lang);
+        });
+      }
+
+      function applyTranslations(lang: string) {
+        const t = translations[lang] || translations['en'];
+        document.querySelectorAll('[data-i18n]').forEach(el => {
+          const key = (el as HTMLElement).dataset.i18n!;
+          if (t[key] !== undefined) {
+            el.textContent = t[key];
+          }
+        });
+        document.querySelectorAll('[data-i18n-html]').forEach(el => {
+          const key = (el as HTMLElement).dataset.i18nHtml!;
+          if (t[key] !== undefined) {
+            el.innerHTML = t[key];
+          }
+        });
+      }
+
+      document.addEventListener('DOMContentLoaded', () => {
+        const lang = getLang();
+        setLang(lang);
+
+        document.querySelectorAll('[data-lang-btn]').forEach(btn => {
+          btn.addEventListener('click', () => {
+            setLang((btn as HTMLElement).dataset.langBtn!);
+          });
+        });
+      });
+
+      (window as any).__setLang = setLang;
+    </script>
+  </body>
+</html>

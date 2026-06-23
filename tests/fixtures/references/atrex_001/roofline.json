@@ -1,0 +1,12 @@
+{
+  "shapes": {
+    "0": {
+      "semantic_W_flops": {
+        "fp32": null
+      },
+      "semantic_Q_read_bytes": null,
+      "semantic_Q_write_bytes": null,
+      "SOL_time_ms": {}
+    }
+  }
+}

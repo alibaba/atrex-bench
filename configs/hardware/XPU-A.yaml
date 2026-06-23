@@ -1,0 +1,30 @@
+# SKU profile: XPU-A (gfx942)
+#
+# Vendor-published peak values for roofline upper-bound analysis.
+# All FLOPS values are dense (sparsity-OFF). All units are SI integers
+# (FLOPs/s, bytes/s) so roofline arithmetic works without conversion.
+#
+# Empirical measurements (if any) live in scripts/measure_compute_peak.py
+# output, not here.
+
+hardware:
+  name: XPU-A
+  arch: gfx942
+
+p_peak:                              # FLOPs/s per execution path
+  bf16_tc:        232650000000000    # 232.65 TFLOPS  - BF16 Tensor Core (= fp8 / 2 per MFMA hardware ratio)
+  fp16_tc:        232650000000000    # 232.65 TFLOPS  - FP16 Tensor Core (same as bf16 on the MFMA path)
+  fp8_e4m3_tc:    465300000000000    # 465.30 TFLOPS  - FP8 e4m3 Tensor Core
+  fp32_strict:     29100000000000    #  29.10 TFLOPS  - FP32 SIMD (no TC)
+
+b_peak:                              # Bytes/s
+  hbm: 5300000000000                 # 5.3 TB/s       - HBM3
+
+source:
+  vendor_doc: 'internal measurement'
+  retrieved_at: '2026-04-24'
+  notes: |
+    XPU-A is a CDNA3-family accelerator.
+    FP8 path requires the FNUZ encoding (torch.float8_e4m3fnuz) on gfx940/941/942.
+    BF16 / FP16 share the same MFMA throughput on CDNA3, both = fp8 / 2.
+    No TF32 tensor-core path on this architecture (omitted).

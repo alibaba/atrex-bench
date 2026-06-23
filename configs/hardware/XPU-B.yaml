@@ -1,0 +1,28 @@
+# SKU profile: XPU-B
+#
+# Vendor-published peak values for roofline upper-bound analysis.
+# All FLOPS values are dense (sparsity-OFF). All units are SI integers
+# (FLOPs/s, bytes/s) so roofline arithmetic works without conversion.
+#
+# Empirical measurements (if any) live in scripts/measure_compute_peak.py
+# output, not here.
+
+hardware:
+  name: XPU-B
+
+p_peak:                            # FLOPs/s per execution path
+  bf16_tc:        148000000000000  # 148.0 TFLOPS  - BF16 Tensor Core
+  fp16_tc:        148000000000000  # 148.0 TFLOPS  - FP16 Tensor Core
+  fp8_e4m3_tc:    296000000000000  # 296.0 TFLOPS  - FP8 e4m3 Tensor Core
+  fp32_tf32_tc:    74000000000000  #  74.0 TFLOPS  - TF32 Tensor Core
+  fp32_strict:     44000000000000  #  44.0 TFLOPS  - FP32 (no Tensor Core)
+
+b_peak:                            # Bytes/s
+  hbm: 4000000000000               # 4.0 TB/s      - HBM3
+
+source:
+  vendor_doc: 'internal measurement'
+  retrieved_at: '2026-04-23'
+  notes: |
+    XPU-B peak values for roofline upper-bound analysis.
+    FP8 tensor-core throughput is 2x the BF16 / FP16 tensor-core path.

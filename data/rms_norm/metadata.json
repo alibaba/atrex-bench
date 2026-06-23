@@ -1,0 +1,529 @@
+{
+  "id": "atrex_027",
+  "status": "trace_reference",
+  "dtype": "bf16",
+  "input_dtypes": {
+    "x": "bf16",
+    "weight": "bf16"
+  },
+  "output_dtypes": {
+    "out": "bf16"
+  },
+  "origin": {
+    "framework": "vllm",
+    "symbol": "rms_norm",
+    "module": "vllm.csrc.layernorm_kernels"
+  },
+  "phase": "prefill/decode",
+  "importance_score": 0.027508,
+  "shapes": {
+    "0": {
+      "description": "(vLLM), RMSNorm, tokens=2500 hidden=1024",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 9.95
+      }
+    },
+    "1": {
+      "description": "(vLLM), RMSNorm, tokens=4968 hidden=1024",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 14.11
+      }
+    },
+    "2": {
+      "description": "(vLLM), RMSNorm, tokens=10000 hidden=1024",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 22.77
+      }
+    },
+    "3": {
+      "description": "(vLLM), RMSNorm, tokens=16200 hidden=1024",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 32.69
+      }
+    },
+    "4": {
+      "description": "(vLLM), RMSNorm, tokens=22100 hidden=1024",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 42.14
+      }
+    },
+    "5": {
+      "description": "(vLLM), RMSNorm, tokens=360 hidden=1152",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 7.75
+      }
+    },
+    "6": {
+      "description": "(vLLM), RMSNorm, tokens=720 hidden=1152",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 8.05
+      }
+    },
+    "7": {
+      "description": "(vLLM), RMSNorm, tokens=1200 hidden=1152",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 9.24
+      }
+    },
+    "8": {
+      "description": "(vLLM), RMSNorm, tokens=2116 hidden=1152",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 12.26
+      }
+    },
+    "9": {
+      "description": "(vLLM), RMSNorm, tokens=3844 hidden=1152",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 17.67
+      }
+    },
+    "10": {
+      "description": "(vLLM), RMSNorm, tokens=8136 hidden=1152",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 31.1
+      }
+    },
+    "11": {
+      "description": "(vLLM), RMSNorm, tokens=15000 hidden=1152",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 52.06
+      }
+    },
+    "12": {
+      "description": "(vLLM), RMSNorm, tokens=24368 hidden=1152",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 81.15
+      }
+    },
+    "13": {
+      "description": "(vLLM), RMSNorm, tokens=49152 hidden=1152",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 157.4
+      }
+    },
+    "14": {
+      "description": "(vLLM), RMSNorm, tokens=65556 hidden=1152",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 208.01
+      }
+    },
+    "15": {
+      "description": "(SGLang), RMSNorm, tokens=3 hidden=128",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 7.55
+      }
+    },
+    "16": {
+      "description": "(SGLang), RMSNorm, tokens=1504 hidden=128",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 7.65
+      }
+    },
+    "17": {
+      "description": "(SGLang), RMSNorm, tokens=2048 hidden=128",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 7.72
+      }
+    },
+    "18": {
+      "description": "(SGLang), RMSNorm, tokens=4096 hidden=128",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 8.7
+      }
+    },
+    "19": {
+      "description": "(SGLang), RMSNorm, tokens=8192 hidden=128",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 11.85
+      }
+    },
+    "20": {
+      "description": "(SGLang), RMSNorm, tokens=16384 hidden=128",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 18.5
+      }
+    },
+    "21": {
+      "description": "(SGLang), RMSNorm, tokens=24544 hidden=128",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 24.36
+      }
+    },
+    "22": {
+      "description": "(SGLang), RMSNorm, tokens=49024 hidden=128",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 42.04
+      }
+    },
+    "23": {
+      "description": "(vLLM), RMSNorm, tokens=65488 hidden=128",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 53.92
+      }
+    },
+    "24": {
+      "description": "(vLLM), RMSNorm, tokens=95952 hidden=128",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 75.83
+      }
+    },
+    "25": {
+      "description": "(vLLM), RMSNorm, tokens=131072 hidden=128",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 101.08
+      }
+    },
+    "26": {
+      "description": "(vLLM), RMSNorm, tokens=247680 hidden=128",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 190.75
+      }
+    },
+    "27": {
+      "description": "(SGLang), RMSNorm, tokens=505888 hidden=128",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 371.16
+      }
+    },
+    "28": {
+      "description": "(vLLM), RMSNorm, tokens=7 hidden=1280",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 7.53
+      }
+    },
+    "29": {
+      "description": "(rtp-llm), RMSNorm, tokens=24752 hidden=1280",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 82.06
+      }
+    },
+    "30": {
+      "description": "(vLLM), RMSNorm, tokens=1736 hidden=1536",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 11.6
+      }
+    },
+    "31": {
+      "description": "(vLLM), RMSNorm, tokens=5000 hidden=1536",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 22.06
+      }
+    },
+    "32": {
+      "description": "(SGLang), RMSNorm, tokens=128 hidden=2048",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 7.65
+      }
+    },
+    "33": {
+      "description": "(SGLang), RMSNorm, tokens=256 hidden=2048",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 7.84
+      }
+    },
+    "34": {
+      "description": "(SGLang), RMSNorm, tokens=512 hidden=2048",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 8.23
+      }
+    },
+    "35": {
+      "description": "(SGLang), RMSNorm, tokens=1029 hidden=2048",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 9.1
+      }
+    },
+    "36": {
+      "description": "(vLLM TP1), RMSNorm, tokens=2010 hidden=2048",
+      "source_framework": "vllm",
+      "call_count": 44,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 12.64
+      }
+    },
+    "37": {
+      "description": "(SGLang), RMSNorm, tokens=4174 hidden=2048",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 20.97
+      }
+    },
+    "38": {
+      "description": "(vLLM), RMSNorm, tokens=8290 hidden=2048",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 34.85
+      }
+    },
+    "39": {
+      "description": "(vLLM), RMSNorm, tokens=16530 hidden=2048",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 62.82
+      }
+    },
+    "40": {
+      "description": "(vLLM), RMSNorm, tokens=20538 hidden=2048",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 80.52
+      }
+    },
+    "41": {
+      "description": "(SGLang), RMSNorm, tokens=3 hidden=256",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 7.49
+      }
+    },
+    "42": {
+      "description": "(SGLang), RMSNorm, tokens=1672 hidden=2560",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 14.17
+      }
+    },
+    "43": {
+      "description": "(vLLM TP1), RMSNorm, tokens=298 hidden=3584",
+      "source_framework": "vllm",
+      "call_count": 27,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 7.94
+      }
+    },
+    "44": {
+      "description": "(vLLM TP1), RMSNorm, tokens=514 hidden=3584",
+      "source_framework": "vllm",
+      "call_count": 27,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 8.71
+      }
+    },
+    "45": {
+      "description": "(vLLM TP1), RMSNorm, tokens=1024 hidden=3584",
+      "source_framework": "vllm",
+      "call_count": 27,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 11.38
+      }
+    },
+    "46": {
+      "description": "(SGLang), RMSNorm, tokens=3 hidden=512",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 7.44
+      }
+    },
+    "47": {
+      "description": "(rtp-llm TP1), RMSNorm, tokens=1 hidden=5120",
+      "source_framework": "rtp-llm",
+      "tensor_parallel_size": 1,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 7.51
+      }
+    },
+    "48": {
+      "description": "(SGLang TP8), RMSNorm, tokens=53 hidden=7168",
+      "source_framework": "sglang",
+      "call_count": 61,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 7.7
+      }
+    },
+    "49": {
+      "description": "(SGLang TP8), RMSNorm, tokens=141 hidden=7168",
+      "source_framework": "sglang",
+      "call_count": 61,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 7.91
+      }
+    },
+    "50": {
+      "description": "(SGLang TP8), RMSNorm, tokens=632 hidden=7168",
+      "source_framework": "sglang",
+      "call_count": 61,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 12.88
+      }
+    },
+    "51": {
+      "description": "(SGLang TP8), RMSNorm, tokens=917 hidden=7168",
+      "source_framework": "sglang",
+      "call_count": 61,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 16.39
+      }
+    },
+    "52": {
+      "description": "(SGLang/vLLM), RMSNorm, tokens=1688 hidden=7168",
+      "shape_key": "(1688)",
+      "call_count": 13659,
+      "total_duration_us": 67362.0,
+      "source_framework": "vllm",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 24.94
+      }
+    },
+    "53": {
+      "description": "(SGLang/vLLM), RMSNorm, tokens=3804 hidden=7168",
+      "shape_key": "(3804)",
+      "call_count": 17609,
+      "total_duration_us": 70305.0,
+      "source_framework": "vllm",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 46.49
+      }
+    },
+    "54": {
+      "description": "(SGLang), RMSNorm, tokens=154 hidden=8192",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 7.97
+      }
+    },
+    "55": {
+      "description": "(SGLang), RMSNorm, tokens=510 hidden=8192",
+      "origin_kernel": "rmsnorm",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 12.43
+      }
+    }
+  }
+}

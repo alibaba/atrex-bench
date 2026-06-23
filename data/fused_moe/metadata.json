@@ -1,0 +1,232 @@
+{
+  "id": "atrex_009",
+  "status": "curated",
+  "dtype": "bf16",
+  "input_dtypes": {
+    "hidden_states": "bf16",
+    "w1": "bf16",
+    "w2": "bf16",
+    "topk_weights": "fp32",
+    "topk_ids": "int32"
+  },
+  "output_dtypes": {
+    "out": "fp32"
+  },
+  "origin": {
+    "framework": "vllm",
+    "symbol": "fused_experts",
+    "module": "vllm.model_executor.layers.fused_moe.fused_moe"
+  },
+  "phase": "prefill/decode",
+  "importance_score": 0.113586,
+  "shapes": {
+    "0": {
+      "description": "(vLLM), MoE expert FFN, tokens=135 hidden=2048 8 experts top-2",
+      "origin_kernel": "fused_moe",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 300.2
+      }
+    },
+    "1": {
+      "description": "(vLLM), MoE expert FFN, tokens=277 hidden=2048 8 experts top-2",
+      "origin_kernel": "fused_moe",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 473.44
+      }
+    },
+    "2": {
+      "description": "(vLLM), MoE expert FFN, tokens=668 hidden=2048 8 experts top-2",
+      "origin_kernel": "fused_moe",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 654.15
+      }
+    },
+    "3": {
+      "description": "(vLLM), MoE expert FFN, tokens=1023 hidden=2048 8 experts top-2",
+      "origin_kernel": "fused_moe",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 947.09
+      }
+    },
+    "4": {
+      "description": "(vLLM), MoE expert FFN, tokens=1979 hidden=2048 8 experts top-2",
+      "origin_kernel": "fused_moe",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 1461.2
+      }
+    },
+    "5": {
+      "description": "(SGLang), MoE expert FFN, tokens=4195 hidden=2048 8 experts top-2",
+      "origin_kernel": "fused_moe",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 3109.21
+      }
+    },
+    "6": {
+      "description": "(vLLM), MoE expert FFN, tokens=7689 hidden=2048 8 experts top-2",
+      "origin_kernel": "fused_moe",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 5987.18
+      }
+    },
+    "7": {
+      "description": "(SGLang), MoE expert FFN, tokens=15809 hidden=2048 8 experts top-2",
+      "origin_kernel": "fused_moe",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 14360.39
+      }
+    },
+    "8": {
+      "description": "(rtp-llm TP1), text decoder MoE expert FFN, hidden_states=(1,2048) 128 experts top-8 intermediate=768",
+      "source_framework": "rtp-llm",
+      "tensor_parallel_size": 1,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 225.92
+      }
+    },
+    "9": {
+      "description": "(vLLM TP1), text decoder MoE expert FFN, hidden_states=(2400,2048) 128 experts top-8 intermediate=768",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 3698.47
+      }
+    },
+    "10": {
+      "description": "(SGLang TP1), text decoder MoE expert FFN, hidden_states=(4195,2048) 128 experts top-8 intermediate=768",
+      "shape_key": "(4195,2048)",
+      "source_kernel_name": "fused_moe_kernel",
+      "source_framework": "sglang",
+      "call_count": 80,
+      "total_duration_us": 86361.0,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 5846.86
+      }
+    },
+    "11": {
+      "description": "(vLLM TP1), text decoder MoE expert FFN, hidden_states=(8192,2048) 128 experts top-8 intermediate=768",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 10565.14
+      }
+    },
+    "12": {
+      "description": "(SGLang TP1), text decoder MoE expert FFN, hidden_states=(15809,2048) 128 experts top-8 intermediate=768",
+      "shape_key": "(15809,2048)",
+      "source_kernel_name": "fused_moe_kernel",
+      "source_framework": "sglang",
+      "call_count": 80,
+      "total_duration_us": 260805.0,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 22238.15
+      }
+    },
+    "13": {
+      "description": "(vLLM TP1), text decoder MoE expert FFN, hidden_states=(25632,2048) 128 experts top-8 intermediate=768",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 40109.11
+      }
+    },
+    "14": {
+      "description": "(vLLM TP1), text decoder MoE expert FFN, hidden_states=(45936,2048) 128 experts top-8 intermediate=768",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 76815.05
+      }
+    },
+    "15": {
+      "description": "(vLLM TP4), text decoder MoE expert FFN, hidden_states=(520,4096) 128 experts top-8 intermediate=384",
+      "source_framework": "vllm",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 1261.98
+      }
+    },
+    "16": {
+      "description": "(vLLM TP4), text decoder MoE expert FFN, hidden_states=(1019,4096) 128 experts top-8 intermediate=384",
+      "source_framework": "vllm",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 1890.97
+      }
+    },
+    "17": {
+      "description": "(vLLM TP4), text decoder MoE expert FFN, hidden_states=(2044,4096) 128 experts top-8 intermediate=384",
+      "source_framework": "vllm",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 3325.66
+      }
+    },
+    "18": {
+      "description": "(vLLM TP4), text decoder MoE expert FFN, hidden_states=(3936,4096) 128 experts top-8 intermediate=384",
+      "source_framework": "vllm",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 5694.2
+      }
+    },
+    "19": {
+      "description": "(vLLM TP4), text decoder MoE expert FFN, hidden_states=(8192,4096) 128 experts top-8 intermediate=384",
+      "source_framework": "vllm",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 11595.71
+      }
+    },
+    "20": {
+      "description": "(SGLang), MoE expert FFN, tokens=4098 hidden=4096 8 experts top-2",
+      "origin_kernel": "fused_moe",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 11607.73
+      }
+    },
+    "21": {
+      "description": "(SGLang), MoE expert FFN, tokens=8179 hidden=4096 8 experts top-2",
+      "origin_kernel": "fused_moe",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 32255.24
+      }
+    },
+    "22": {
+      "description": "(SGLang), MoE expert FFN, tokens=15381 hidden=4096 8 experts top-2",
+      "origin_kernel": "fused_moe",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 71529.43
+      }
+    }
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "shapes": {
+    "0": {
+      "semantic_W_flops": {
+        "fp8_e4m3": 2329468327936
+      },
+      "semantic_Q_read_bytes": 671193728,
+      "semantic_Q_write_bytes": 63121408,
+      "SOL_time_ms": {
+        "XPU-A": 5.006379385205244,
+        "XPU-B": 7.869825432216216
+      }
+    },
+    "1": {
+      "semantic_W_flops": {
+        "fp8_e4m3": 2692484431872
+      },
+      "semantic_Q_read_bytes": 11305404288,
+      "semantic_Q_write_bytes": 27267072,
+      "SOL_time_ms": {
+        "XPU-A": 5.7865558389684075,
+        "XPU-B": 9.096231188756757
+      }
+    },
+    "2": {
+      "semantic_W_flops": {
+        "fp8_e4m3": 1057161216
+      },
+      "semantic_Q_read_bytes": 352415008,
+      "semantic_Q_write_bytes": 7168,
+      "SOL_time_ms": {
+        "XPU-A": 0.06649475018867924,
+        "XPU-B": 0.088105544
+      }
+    },
+    "3": {
+      "semantic_W_flops": {
+        "fp8_e4m3": 29777461248
+      },
+      "semantic_Q_read_bytes": 7224593408,
+      "semantic_Q_write_bytes": 229376,
+      "SOL_time_ms": {
+        "XPU-A": 1.3631741101886794,
+        "XPU-B": 1.806205696
+      }
+    },
+    "4": {
+      "semantic_W_flops": {
+        "fp8_e4m3": 453111808
+      },
+      "semantic_Q_read_bytes": 151036096,
+      "semantic_Q_write_bytes": 4096,
+      "SOL_time_ms": {
+        "XPU-A": 0.028498149433962262,
+        "XPU-B": 0.037760048
+      }
+    },
+    "5": {
+      "semantic_W_flops": {
+        "fp8_e4m3": 775835090944
+      },
+      "semantic_Q_read_bytes": 2427486208,
+      "semantic_Q_write_bytes": 10485760,
+      "SOL_time_ms": {
+        "XPU-A": 1.6673868277326456,
+        "XPU-B": 2.621064496432432
+      }
+    }
+  }
+}

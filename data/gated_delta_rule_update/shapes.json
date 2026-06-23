@@ -1,0 +1,274 @@
+{
+  "0": {
+    "init_kwargs": {
+      "softplus_beta": 1.0,
+      "softplus_threshold": 20.0,
+      "use_qk_l2norm": true
+    },
+    "input_kwargs": {
+      "token_count": 1,
+      "num_v_heads": 32,
+      "state_count": 2,
+      "value_dim": 128,
+      "num_q_heads": 16,
+      "key_dim": 128,
+      "batch_size": 1
+    }
+  },
+  "1": {
+    "init_kwargs": {
+      "softplus_beta": 1.0,
+      "softplus_threshold": 20.0,
+      "use_qk_l2norm": true
+    },
+    "input_kwargs": {
+      "token_count": 128,
+      "num_v_heads": 32,
+      "state_count": 2,
+      "value_dim": 128,
+      "num_q_heads": 16,
+      "key_dim": 128,
+      "batch_size": 1
+    }
+  },
+  "2": {
+    "init_kwargs": {
+      "softplus_beta": 1.0,
+      "softplus_threshold": 20.0,
+      "use_qk_l2norm": true
+    },
+    "input_kwargs": {
+      "token_count": 258,
+      "num_v_heads": 32,
+      "state_count": 2,
+      "value_dim": 128,
+      "num_q_heads": 16,
+      "key_dim": 128,
+      "batch_size": 1
+    }
+  },
+  "3": {
+    "init_kwargs": {
+      "softplus_beta": 1.0,
+      "softplus_threshold": 20.0,
+      "use_qk_l2norm": true
+    },
+    "input_kwargs": {
+      "token_count": 544,
+      "num_v_heads": 32,
+      "state_count": 2,
+      "value_dim": 128,
+      "num_q_heads": 16,
+      "key_dim": 128,
+      "batch_size": 1
+    }
+  },
+  "4": {
+    "init_kwargs": {
+      "softplus_beta": 1.0,
+      "softplus_threshold": 20.0,
+      "use_qk_l2norm": true
+    },
+    "input_kwargs": {
+      "token_count": 1033,
+      "num_v_heads": 32,
+      "state_count": 2,
+      "value_dim": 128,
+      "num_q_heads": 16,
+      "key_dim": 128,
+      "batch_size": 1
+    }
+  },
+  "5": {
+    "init_kwargs": {
+      "softplus_beta": 1.0,
+      "softplus_threshold": 20.0,
+      "use_qk_l2norm": true
+    },
+    "input_kwargs": {
+      "token_count": 2051,
+      "num_v_heads": 32,
+      "state_count": 2,
+      "value_dim": 128,
+      "num_q_heads": 16,
+      "key_dim": 128,
+      "batch_size": 1
+    }
+  },
+  "6": {
+    "init_kwargs": {
+      "softplus_beta": 1.0,
+      "softplus_threshold": 20.0,
+      "use_qk_l2norm": true
+    },
+    "input_kwargs": {
+      "token_count": 4120,
+      "num_v_heads": 32,
+      "state_count": 2,
+      "value_dim": 128,
+      "num_q_heads": 16,
+      "key_dim": 128,
+      "batch_size": 1
+    }
+  },
+  "7": {
+    "init_kwargs": {
+      "softplus_beta": 1.0,
+      "softplus_threshold": 20.0,
+      "use_qk_l2norm": true
+    },
+    "input_kwargs": {
+      "token_count": 8192,
+      "num_v_heads": 32,
+      "state_count": 2,
+      "value_dim": 128,
+      "num_q_heads": 16,
+      "key_dim": 128,
+      "batch_size": 1
+    }
+  },
+  "8": {
+    "init_kwargs": {
+      "softplus_beta": 1.0,
+      "softplus_threshold": 20.0,
+      "use_qk_l2norm": true
+    },
+    "input_kwargs": {
+      "token_count": 1,
+      "num_v_heads": 8,
+      "state_count": 2,
+      "value_dim": 128,
+      "num_q_heads": 4,
+      "key_dim": 128,
+      "batch_size": 1
+    }
+  },
+  "9": {
+    "init_kwargs": {
+      "softplus_beta": 1.0,
+      "softplus_threshold": 20.0,
+      "use_qk_l2norm": true
+    },
+    "input_kwargs": {
+      "token_count": 1,
+      "num_v_heads": 16,
+      "state_count": 2,
+      "value_dim": 128,
+      "num_q_heads": 8,
+      "key_dim": 128,
+      "batch_size": 1
+    }
+  },
+  "10": {
+    "init_kwargs": {
+      "softplus_beta": 1.0,
+      "softplus_threshold": 20.0,
+      "use_qk_l2norm": true
+    },
+    "input_kwargs": {
+      "token_count": 129,
+      "num_v_heads": 16,
+      "state_count": 2,
+      "value_dim": 128,
+      "num_q_heads": 8,
+      "key_dim": 128,
+      "batch_size": 1
+    }
+  },
+  "12": {
+    "init_kwargs": {
+      "softplus_beta": 1.0,
+      "softplus_threshold": 20.0,
+      "use_qk_l2norm": true
+    },
+    "input_kwargs": {
+      "batch_size": 1,
+      "token_count": 130,
+      "num_q_heads": 16,
+      "num_v_heads": 32,
+      "key_dim": 128,
+      "value_dim": 128,
+      "state_count": 2
+    }
+  },
+  "13": {
+    "init_kwargs": {
+      "softplus_beta": 1.0,
+      "softplus_threshold": 20.0,
+      "use_qk_l2norm": true
+    },
+    "input_kwargs": {
+      "batch_size": 1,
+      "token_count": 256,
+      "num_q_heads": 16,
+      "num_v_heads": 32,
+      "key_dim": 128,
+      "value_dim": 128,
+      "state_count": 2
+    }
+  },
+  "14": {
+    "init_kwargs": {
+      "softplus_beta": 1.0,
+      "softplus_threshold": 20.0,
+      "use_qk_l2norm": true
+    },
+    "input_kwargs": {
+      "batch_size": 1,
+      "token_count": 512,
+      "num_q_heads": 16,
+      "num_v_heads": 32,
+      "key_dim": 128,
+      "value_dim": 128,
+      "state_count": 2
+    }
+  },
+  "15": {
+    "init_kwargs": {
+      "softplus_beta": 1.0,
+      "softplus_threshold": 20.0,
+      "use_qk_l2norm": true
+    },
+    "input_kwargs": {
+      "batch_size": 1,
+      "token_count": 1029,
+      "num_q_heads": 16,
+      "num_v_heads": 32,
+      "key_dim": 128,
+      "value_dim": 128,
+      "state_count": 2
+    }
+  },
+  "16": {
+    "init_kwargs": {
+      "softplus_beta": 1.0,
+      "softplus_threshold": 20.0,
+      "use_qk_l2norm": true
+    },
+    "input_kwargs": {
+      "batch_size": 1,
+      "token_count": 1831,
+      "num_q_heads": 16,
+      "num_v_heads": 32,
+      "key_dim": 128,
+      "value_dim": 128,
+      "state_count": 2
+    }
+  },
+  "17": {
+    "init_kwargs": {
+      "softplus_beta": 1.0,
+      "softplus_threshold": 20.0,
+      "use_qk_l2norm": true
+    },
+    "input_kwargs": {
+      "batch_size": 1,
+      "token_count": 3251,
+      "num_q_heads": 16,
+      "num_v_heads": 32,
+      "key_dim": 128,
+      "value_dim": 128,
+      "state_count": 2
+    }
+  }
+}

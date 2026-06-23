@@ -1,0 +1,28 @@
+# Keep the Docker build context small. `data/` is intentionally NOT ignored so the
+# benchmark operators can be baked into a self-contained image.
+.git
+.github
+.gitignore
+
+# Results website (not needed at runtime)
+site
+
+# Generated / local artifacts
+outputs
+results
+*.log
+
+# Python caches & envs
+**/__pycache__
+*.py[cod]
+*.egg-info
+.pytest_cache
+.ruff_cache
+.venv
+venv
+.mypy_cache
+
+# Editor / OS cruft
+.DS_Store
+.idea
+.vscode

@@ -1,0 +1,192 @@
+{
+  "id": "atrex_025",
+  "status": "curated",
+  "dtype": "fp8_e4m3",
+  "input_dtypes": {
+    "x": "bf16"
+  },
+  "output_dtypes": {
+    "quantized": "fp8_e4m3",
+    "scales": "fp32"
+  },
+  "origin": {
+    "framework": "vllm",
+    "symbol": "per_token_group_quant_fp8",
+    "module": "vllm.model_executor.layers.quantization.utils.fp8_utils"
+  },
+  "phase": "prefill/decode",
+  "importance_score": 0.005308,
+  "shapes": {
+    "0": {
+      "description": "(vLLM TP1), FP8 per-token-group quantization, input=(1,2048) group_size=128",
+      "source_framework": "vllm",
+      "call_count": 9408,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 7.59
+      }
+    },
+    "1": {
+      "description": "(vLLM TP1), FP8 per-token-group quantization, input=(37504,2048) group_size=128",
+      "source_framework": "vllm",
+      "call_count": 96,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 106.13
+      }
+    },
+    "2": {
+      "description": "(vLLM TP1), FP8 per-token-group quantization, input=(75008,2048) group_size=128",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 199.63
+      }
+    },
+    "3": {
+      "description": "(vLLM TP1), FP8 per-token-group quantization, input=(85632,2048) group_size=128",
+      "source_framework": "vllm",
+      "call_count": 96,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 223.27
+      }
+    },
+    "4": {
+      "description": "(vLLM TP1), FP8 per-token-group quantization, input=(128192,2048) group_size=128",
+      "source_framework": "vllm",
+      "call_count": 96,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 325.73
+      }
+    },
+    "5": {
+      "description": "(vLLM TP1), FP8 per-token-group quantization, input=(256896,2048) group_size=128",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 639.8
+      }
+    },
+    "6": {
+      "description": "(vLLM TP1), FP8 per-token-group quantization, input=(500736,2048) group_size=128",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 1258.41
+      }
+    },
+    "7": {
+      "description": "(vLLM TP1), FP8 per-token-group quantization, input=(1029056,2048) group_size=128",
+      "source_framework": "vllm",
+      "call_count": 96,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 2622.15
+      }
+    },
+    "8": {
+      "description": "(vLLM TP1), FP8 per-token-group quantization, input=(2058112,2048) group_size=128",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 5328.02
+      }
+    },
+    "9": {
+      "description": "(vLLM TP1), FP8 per-token-group quantization, input=(3087168,2048) group_size=128",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 7125.66
+      }
+    },
+    "10": {
+      "description": "(SGLang TP8), FP8 per-token-group quantization, input=(1,7168) group_size=128",
+      "source_framework": "sglang",
+      "call_count": 72750,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 7.58
+      }
+    },
+    "11": {
+      "description": "(SGLang TP8), FP8 per-token-group quantization, input=(726,7168) group_size=128",
+      "source_framework": "sglang",
+      "call_count": 61,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 13.91
+      }
+    },
+    "12": {
+      "description": "(SGLang TP8), FP8 per-token-group quantization, input=(969,7168) group_size=128",
+      "source_framework": "sglang",
+      "call_count": 61,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 15.59
+      }
+    },
+    "13": {
+      "description": "(SGLang TP8), FP8 per-token-group quantization, input=(1933,7168) group_size=128",
+      "source_framework": "sglang",
+      "call_count": 61,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 23.12
+      }
+    },
+    "14": {
+      "description": "(SGLang TP8), FP8 per-token-group quantization, input=(4192,7168) group_size=128",
+      "source_framework": "sglang",
+      "call_count": 61,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 47.6
+      }
+    },
+    "15": {
+      "description": "(SGLang TP8), FP8 per-token-group quantization, input=(8667,7168) group_size=128",
+      "source_framework": "sglang",
+      "call_count": 61,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 91.51
+      }
+    },
+    "16": {
+      "description": "(SGLang TP8), FP8 per-token-group quantization, input=(16768,7168) group_size=128",
+      "source_framework": "sglang",
+      "call_count": 61,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 154.05
+      }
+    },
+    "17": {
+      "description": "(SGLang TP8), FP8 per-token-group quantization, input=(40448,7168) group_size=128",
+      "source_framework": "sglang",
+      "call_count": 125,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 355.75
+      }
+    },
+    "18": {
+      "description": "(SGLang TP8), FP8 per-token-group quantization, input=(58688,7168) group_size=128",
+      "source_framework": "sglang",
+      "call_count": 125,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 515.14
+      }
+    }
+  }
+}

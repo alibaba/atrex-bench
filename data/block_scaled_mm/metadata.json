@@ -1,0 +1,243 @@
+{
+  "id": "atrex_002",
+  "status": "curated",
+  "dtype": "fp8_e4m3",
+  "input_dtypes": {
+    "a": "fp8_e4m3",
+    "b": "fp8_e4m3",
+    "a_scales": "fp32",
+    "b_scales": "fp32"
+  },
+  "output_dtypes": {
+    "out": "fp32"
+  },
+  "origin": {
+    "framework": "vllm",
+    "symbol": "w8a8_triton_block_scaled_mm",
+    "module": "vllm.model_executor.layers.quantization.utils.fp8_utils"
+  },
+  "phase": "prefill/decode",
+  "importance_score": 0.093155,
+  "shapes": {
+    "0": {
+      "description": "(sglang TP1), FP8 block-scale GEMM, input=(349,2048) group=128x128",
+      "source_framework": "sglang",
+      "call_count": 140,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 61.78
+      }
+    },
+    "1": {
+      "description": "(vLLM TP1), FP8 block-scale GEMM (triton), m=1024",
+      "source_framework": "vllm",
+      "call_count": 560,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 73.94
+      }
+    },
+    "2": {
+      "description": "(vLLM TP4), FP8 block-scaled GEMM inferred, m=4533 n=2048 k=2048",
+      "shape_key": "(4533,2048)",
+      "call_count": 96,
+      "total_duration_us": 76994.0,
+      "source_framework": "vllm",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 300.0
+      }
+    },
+    "3": {
+      "description": "(vLLM TP4), FP8 block-scaled GEMM inferred, m=6918 n=2048 k=2048",
+      "shape_key": "(6918,2048)",
+      "call_count": 96,
+      "total_duration_us": 164765.0,
+      "source_framework": "vllm",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 440.4
+      }
+    },
+    "4": {
+      "description": "(vLLM TP1), FP8 block-scale GEMM (triton), m=20480",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 1237.3
+      }
+    },
+    "5": {
+      "description": "(vLLM TP1), FP8 block-scale GEMM (triton), m=51200",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 3098.02
+      }
+    },
+    "6": {
+      "description": "(vLLM TP1), FP8 block-scale GEMM (triton), m=65536",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 3965.56
+      }
+    },
+    "7": {
+      "description": "(vLLM TP1), FP8 block-scale GEMM (triton), m=98304",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 5930.78
+      }
+    },
+    "8": {
+      "description": "(vLLM TP1), FP8 block-scale GEMM (triton), m=118784",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 7181.28
+      }
+    },
+    "9": {
+      "description": "(vLLM TP1), FP8 block-scale GEMM (triton), m=250880",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 15131.47
+      }
+    },
+    "10": {
+      "description": "(vLLM TP1), FP8 block-scale GEMM (triton), m=516096",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 31144.12
+      }
+    },
+    "11": {
+      "description": "(vLLM TP1), FP8 block-scale GEMM (triton), m=704512",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 42516.39
+      }
+    },
+    "12": {
+      "description": "(sglang TP1), FP8 block-scale GEMM, input=(237,4096) group=128x128",
+      "source_framework": "sglang",
+      "call_count": 1174,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 118.28
+      }
+    },
+    "13": {
+      "description": "(SGLang TP8), FP8 block-scale GEMM, m=3072",
+      "source_framework": "sglang",
+      "call_count": 60,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 801.92
+      }
+    },
+    "14": {
+      "description": "(SGLang TP8), FP8 block-scale GEMM, m=4096",
+      "source_framework": "sglang",
+      "call_count": 60,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 1059.5
+      }
+    },
+    "15": {
+      "description": "(SGLang TP8), FP8 block-scale GEMM, m=8192",
+      "source_framework": "sglang",
+      "call_count": 60,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 2090.07
+      }
+    },
+    "16": {
+      "description": "(SGLang TP8), FP8 block-scale GEMM, m=16384",
+      "source_framework": "sglang",
+      "call_count": 45,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 4192.35
+      }
+    },
+    "17": {
+      "description": "(SGLang TP8), FP8 block-scale GEMM, m=24576",
+      "source_framework": "sglang",
+      "call_count": 120,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 6235.72
+      }
+    },
+    "18": {
+      "description": "(SGLang TP8), FP8 block-scale GEMM, m=49152",
+      "source_framework": "sglang",
+      "call_count": 45,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 12429.31
+      }
+    },
+    "19": {
+      "description": "(SGLang TP8), FP8 block-scale GEMM, m=65536",
+      "source_framework": "sglang",
+      "call_count": 120,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 16552.24
+      }
+    },
+    "20": {
+      "description": "(SGLang TP8), FP8 block-scale GEMM, m=98304",
+      "source_framework": "sglang",
+      "call_count": 45,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 24806.03
+      }
+    },
+    "21": {
+      "description": "(SGLang TP8), FP8 block-scale GEMM, m=131072",
+      "source_framework": "sglang",
+      "call_count": 120,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 33046.9
+      }
+    },
+    "22": {
+      "description": "(SGLang TP8), FP8 block-scale GEMM, m=258048",
+      "source_framework": "sglang",
+      "call_count": 120,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 65100.17
+      }
+    },
+    "23": {
+      "description": "(SGLang TP8), FP8 block-scale GEMM, m=299520",
+      "source_framework": "sglang",
+      "call_count": 15,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 75566.14
+      }
+    }
+  }
+}

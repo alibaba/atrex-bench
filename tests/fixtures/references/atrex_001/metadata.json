@@ -1,0 +1,15 @@
+{
+  "id": "atrex_901",
+  "dtype": "fp32",
+  "input_dtypes": {
+    "x": "fp32"
+  },
+  "output_dtypes": {
+    "out": "fp32"
+  },
+  "origin": {
+    "framework": "synthetic",
+    "symbol": "relu",
+    "module": "tests.fixtures.references.atrex_001"
+  }
+}

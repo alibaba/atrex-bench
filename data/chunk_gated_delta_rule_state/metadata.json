@@ -1,0 +1,256 @@
+{
+  "id": "atrex_005",
+  "status": "trace_reference",
+  "dtype": "bf16",
+  "input_dtypes": {
+    "k": "bf16",
+    "w": "bf16",
+    "u": "bf16",
+    "g": "fp32",
+    "initial_state": "fp32",
+    "initial_state_indices": "int32"
+  },
+  "output_dtypes": {
+    "h": "bf16",
+    "v_new": "bf16",
+    "final_state": "fp32"
+  },
+  "origin": {
+    "framework": "sglang/vllm",
+    "symbol": "chunk_gated_delta_rule_fwd_h",
+    "module": "sglang.srt.layers.attention.fla.chunk_delta_h"
+  },
+  "phase": "prefill",
+  "importance_score": 0.015735,
+  "shapes": {
+    "0": {
+      "description": "(vLLM TP1), chunk state update, tokens=2048 heads=1/2 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 30,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 93.15
+      }
+    },
+    "1": {
+      "description": "(vLLM TP1), chunk state update, tokens=2048 heads=10/20 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 42,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 184.85
+      }
+    },
+    "2": {
+      "description": "(vLLM TP1), chunk state update, tokens=2048 heads=11/22 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 21,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 269.83
+      }
+    },
+    "3": {
+      "description": "(vLLM TP1), chunk state update, tokens=2048 heads=12/24 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 42,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 290.52
+      }
+    },
+    "4": {
+      "description": "(vLLM TP1), chunk state update, tokens=2048 heads=13/26 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 21,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 284.57
+      }
+    },
+    "5": {
+      "description": "(vLLM TP1), chunk state update, tokens=2048 heads=14/28 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 21,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 293.59
+      }
+    },
+    "6": {
+      "description": "(vLLM TP1), chunk state update, tokens=2048 heads=15/30 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 30,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 293.19
+      }
+    },
+    "7": {
+      "description": "(vLLM TP1), chunk state update, tokens=2048 heads=16/32 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 42,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 415.97
+      }
+    },
+    "8": {
+      "description": "(vLLM TP1), chunk state update, tokens=2048 heads=2/4 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 270,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 95.01
+      }
+    },
+    "9": {
+      "description": "(vLLM TP1), chunk state update, tokens=4096 heads=2/4 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 60,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 179.02
+      }
+    },
+    "10": {
+      "description": "(vLLM TP1), chunk state update, tokens=8192 heads=2/4 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 210,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 348.41
+      }
+    },
+    "11": {
+      "description": "(vLLM TP1), chunk state update, tokens=16384 heads=2/4 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 21,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 767.58
+      }
+    },
+    "12": {
+      "description": "(vLLM TP1), chunk state update, tokens=24576 heads=2/4 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 21,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 1203.67
+      }
+    },
+    "13": {
+      "description": "(vLLM TP1), chunk state update, tokens=2048 heads=3/6 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 210,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 94.23
+      }
+    },
+    "14": {
+      "description": "(vLLM TP4), chunk state update, tokens=512 heads=4/8 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 36,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 32.16
+      }
+    },
+    "15": {
+      "description": "(vLLM TP4), chunk state update, tokens=1024 heads=4/8 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 72,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 54.07
+      }
+    },
+    "16": {
+      "description": "(vLLM TP1), chunk state update, tokens=2048 heads=4/8 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 30,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 97.11
+      }
+    },
+    "17": {
+      "description": "(vLLM TP1), chunk state update, tokens=2048 heads=5/10 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 63,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 95.73
+      }
+    },
+    "18": {
+      "description": "(vLLM TP1), chunk state update, tokens=2048 heads=6/12 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 21,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 184.31
+      }
+    },
+    "19": {
+      "description": "(vLLM TP1), chunk state update, tokens=2048 heads=7/14 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 30,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 181.93
+      }
+    },
+    "20": {
+      "description": "(SGLang TP8), chunk state update, tokens=1024 heads=8/16 dim=128/128",
+      "source_framework": "sglang",
+      "call_count": 270,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 101.62
+      }
+    },
+    "21": {
+      "description": "(SGLang TP8), chunk state update, tokens=2048 heads=8/16 dim=128/128",
+      "source_framework": "sglang",
+      "call_count": 45,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 188.42
+      }
+    },
+    "22": {
+      "description": "(vLLM TP1), chunk state update, tokens=2048 heads=9/18 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 20,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 182.59
+      }
+    },
+    "23": {
+      "description": "(SGLang/vLLM), chunk state update, tokens=4195 heads=16/32 dim=128/128",
+      "shape_key": "(1,4195,16,128)",
+      "call_count": 30,
+      "total_duration_us": 18198.0,
+      "source_framework": "sglang/vllm",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 899.54
+      }
+    },
+    "24": {
+      "description": "(SGLang/vLLM), chunk state update, tokens=11027 heads=16/32 dim=128/128",
+      "shape_key": "(1,11027,16,128)",
+      "call_count": 30,
+      "total_duration_us": 50496.0,
+      "source_framework": "sglang/vllm",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 2352.36
+      }
+    }
+  }
+}

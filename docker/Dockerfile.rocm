@@ -1,0 +1,49 @@
+# Atrex-Bench ROCm image.
+#
+# Bundles the full runtime for evaluating / generating kernels on an AMD GPU host:
+#   PyTorch (ROCm), AITER, Triton, FlyDSL, Node 22, and the Claude Code / Codex CLIs.
+#
+#   Build:  ./docker/build.sh
+#           (or: docker build -f docker/Dockerfile.rocm -t atrex-bench:rocm7.2 .)
+#   Run:    see README.md  ->  "Docker (ROCm)"
+#
+# The base image is AMD's official public ROCm + PyTorch build on Docker Hub:
+#   https://hub.docker.com/r/rocm/pytorch
+ARG BASE_IMAGE=rocm/pytorch:rocm7.2_ubuntu22.04_py3.10_pytorch_release_2.10.0
+FROM ${BASE_IMAGE}
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git cmake ninja-build build-essential curl ca-certificates \
+        vim less htop tmux \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node.js 22 (required by the Claude Code / Codex CLIs the generation harness drives)
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/* \
+    && npm install -g @anthropic-ai/claude-code @openai/codex
+
+WORKDIR /opt
+
+# AITER (AI Tensor Engine for ROCm) -- public AMD repo.
+# --recursive pulls submodules; `setup.py develop` also installs the matching ROCm Triton.
+# For a reproducible build, pin a ref:  docker build --build-arg AITER_REF=<commit-or-tag> ...
+ARG GIT_BASE=https://github.com
+ARG AITER_REF=
+RUN git clone --recursive ${GIT_BASE}/ROCm/aiter.git \
+    && cd aiter \
+    && if [ -n "${AITER_REF}" ]; then \
+           git checkout "${AITER_REF}" && git submodule update --init --recursive; \
+       fi \
+    && python3 setup.py develop
+
+# FlyDSL -- prebuilt wheel from public PyPI (https://pypi.org/project/flydsl/).
+# Pinned for reproducibility; bump as new releases land.
+RUN pip install flydsl==0.2.2
+
+WORKDIR /workspace
+CMD ["/bin/bash"]

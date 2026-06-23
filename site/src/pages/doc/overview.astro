@@ -1,0 +1,15 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import PageHeader from '../../components/PageHeader.astro';
+import Pipeline from '../../components/Pipeline.astro';
+---
+
+<Layout title="Overview — Atrex-Bench">
+  <PageHeader
+    titleKey="nav.overview"
+    titleFallback="Overview"
+    subtitleKey="pipeline.intro"
+    subtitleFallback="A three-stage evaluation pipeline with isolated generation and evaluation environments."
+  />
+  <Pipeline />
+</Layout>

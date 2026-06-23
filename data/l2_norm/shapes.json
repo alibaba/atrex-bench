@@ -1,0 +1,119 @@
+{
+  "0": {
+    "init_kwargs": {
+      "hidden_size": 2048
+    },
+    "input_kwargs": {
+      "num_tokens": 1,
+      "hidden_size": 2048
+    }
+  },
+  "1": {
+    "init_kwargs": {
+      "hidden_size": 2048
+    },
+    "input_kwargs": {
+      "num_tokens": 128,
+      "hidden_size": 2048
+    }
+  },
+  "2": {
+    "init_kwargs": {
+      "hidden_size": 2048
+    },
+    "input_kwargs": {
+      "num_tokens": 256,
+      "hidden_size": 2048
+    }
+  },
+  "3": {
+    "init_kwargs": {
+      "hidden_size": 2048
+    },
+    "input_kwargs": {
+      "num_tokens": 480,
+      "hidden_size": 2048
+    }
+  },
+  "4": {
+    "init_kwargs": {
+      "hidden_size": 2048
+    },
+    "input_kwargs": {
+      "num_tokens": 2304,
+      "hidden_size": 2048
+    }
+  },
+  "5": {
+    "init_kwargs": {
+      "hidden_size": 2048
+    },
+    "input_kwargs": {
+      "num_tokens": 4064,
+      "hidden_size": 2048
+    }
+  },
+  "6": {
+    "init_kwargs": {
+      "hidden_size": 2048
+    },
+    "input_kwargs": {
+      "num_tokens": 8736,
+      "hidden_size": 2048
+    }
+  },
+  "7": {
+    "init_kwargs": {
+      "hidden_size": 2048
+    },
+    "input_kwargs": {
+      "num_tokens": 16608,
+      "hidden_size": 2048
+    }
+  },
+  "8": {
+    "init_kwargs": {
+      "hidden_size": 2048
+    },
+    "input_kwargs": {
+      "num_tokens": 24480,
+      "hidden_size": 2048
+    }
+  },
+  "9": {
+    "init_kwargs": {
+      "hidden_size": 2048
+    },
+    "input_kwargs": {
+      "num_tokens": 48704,
+      "hidden_size": 2048
+    }
+  },
+  "10": {
+    "init_kwargs": {
+      "hidden_size": 2048
+    },
+    "input_kwargs": {
+      "num_tokens": 65792,
+      "hidden_size": 2048
+    }
+  },
+  "11": {
+    "init_kwargs": {
+      "hidden_size": 2048
+    },
+    "input_kwargs": {
+      "num_tokens": 98880,
+      "hidden_size": 2048
+    }
+  },
+  "12": {
+    "init_kwargs": {
+      "hidden_size": 2048
+    },
+    "input_kwargs": {
+      "num_tokens": 131072,
+      "hidden_size": 2048
+    }
+  }
+}

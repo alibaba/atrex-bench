@@ -1,0 +1,110 @@
+{
+  "id": "atrex_003",
+  "status": "trace_reference",
+  "dtype": "bf16",
+  "input_dtypes": {
+    "x": "bf16",
+    "weight": "bf16",
+    "bias": "bf16",
+    "initial_state": "bf16"
+  },
+  "output_dtypes": {
+    "out": "bf16"
+  },
+  "origin": {
+    "framework": "sglang",
+    "symbol": "causal_conv1d_fn",
+    "module": "sglang.srt.layers.attention.mamba.causal_conv1d_triton"
+  },
+  "phase": "prefill",
+  "importance_score": 0.021834,
+  "shapes": {
+    "0": {
+      "description": "(SGLang TP1), causal depthwise conv1d, tokens=1 dim=4096 width=4",
+      "source_framework": "sglang",
+      "call_count": 17910,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 7.64
+      }
+    },
+    "1": {
+      "description": "(vLLM TP1), causal depthwise conv1d, tokens=128 dim=4096 width=4",
+      "source_framework": "vllm",
+      "call_count": 21,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 35.7
+      }
+    },
+    "2": {
+      "description": "(vLLM TP1), causal depthwise conv1d, tokens=256 dim=4096 width=4",
+      "source_framework": "vllm",
+      "call_count": 21,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 77.11
+      }
+    },
+    "3": {
+      "description": "(vLLM TP1), causal depthwise conv1d, tokens=514 dim=4096 width=4",
+      "source_framework": "vllm",
+      "call_count": 21,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 100.6
+      }
+    },
+    "4": {
+      "description": "(vLLM TP1), causal depthwise conv1d, tokens=1024 dim=4096 width=4",
+      "source_framework": "vllm",
+      "call_count": 84,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 272.44
+      }
+    },
+    "5": {
+      "description": "(SGLang TP8), causal depthwise conv1d, tokens=1 dim=8192 width=4",
+      "source_framework": "sglang",
+      "call_count": 45,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 7.68
+      }
+    },
+    "6": {
+      "description": "(SGLang), causal depthwise conv1d, tokens=4195 dim=8192 width=4",
+      "shape_key": "(4195,8192)",
+      "call_count": 30,
+      "total_duration_us": 5885.0,
+      "source_framework": "sglang",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 1334.91
+      }
+    },
+    "7": {
+      "description": "(SGLang), causal depthwise conv1d, tokens=11027 dim=8192 width=4",
+      "shape_key": "(11027,8192)",
+      "call_count": 30,
+      "total_duration_us": 16470.0,
+      "source_framework": "sglang",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 3496.68
+      }
+    },
+    "8": {
+      "description": "(SGLang), causal depthwise conv1d, tokens=14807 dim=8192 width=4",
+      "shape_key": "(14807,8192)",
+      "call_count": 30,
+      "total_duration_us": 22276.0,
+      "source_framework": "sglang",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 4659.6
+      }
+    }
+  }
+}

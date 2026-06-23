@@ -1,0 +1,212 @@
+{
+  "0": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "num_heads": 16,
+      "head_dim": 72,
+      "seq_lens": [
+        720
+      ]
+    }
+  },
+  "1": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "num_heads": 16,
+      "head_dim": 72,
+      "seq_lens": [
+        1200
+      ]
+    }
+  },
+  "2": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "num_heads": 16,
+      "head_dim": 72,
+      "seq_lens": [
+        2116
+      ]
+    }
+  },
+  "3": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "num_heads": 16,
+      "head_dim": 72,
+      "seq_lens": [
+        3844
+      ]
+    }
+  },
+  "4": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "num_heads": 16,
+      "head_dim": 72,
+      "seq_lens": [
+        8136
+      ]
+    }
+  },
+  "5": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "num_heads": 16,
+      "head_dim": 72,
+      "seq_lens": [
+        17296
+      ]
+    }
+  },
+  "6": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "num_heads": 16,
+      "head_dim": 72,
+      "seq_lens": [
+        24368
+      ]
+    }
+  },
+  "7": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "num_heads": 16,
+      "head_dim": 72,
+      "seq_lens": [
+        49596
+      ]
+    }
+  },
+  "8": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "num_heads": 16,
+      "head_dim": 72,
+      "seq_lens": [
+        65556
+      ]
+    }
+  },
+  "9": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "num_heads": 32,
+      "head_dim": 128,
+      "seq_lens": [
+        16742
+      ]
+    }
+  },
+  "10": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "num_heads": 32,
+      "head_dim": 128,
+      "seq_lens": [
+        30793
+      ]
+    }
+  },
+  "11": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "num_heads": 4,
+      "head_dim": 72,
+      "seq_lens": [
+        276
+      ]
+    }
+  },
+  "12": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "num_heads": 4,
+      "head_dim": 72,
+      "seq_lens": [
+        600
+      ]
+    }
+  },
+  "13": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "num_heads": 4,
+      "head_dim": 72,
+      "seq_lens": [
+        1012
+      ]
+    }
+  },
+  "14": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "num_heads": 4,
+      "head_dim": 72,
+      "seq_lens": [
+        2024
+      ]
+    }
+  },
+  "15": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "num_heads": 4,
+      "head_dim": 72,
+      "seq_lens": [
+        4100
+      ]
+    }
+  },
+  "16": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "num_heads": 4,
+      "head_dim": 72,
+      "seq_lens": [
+        8184
+      ]
+    }
+  },
+  "17": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "num_heads": 4,
+      "head_dim": 72,
+      "seq_lens": [
+        15476
+      ]
+    }
+  },
+  "18": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "num_heads": 4,
+      "head_dim": 72,
+      "seq_lens": [
+        24952
+      ]
+    }
+  },
+  "19": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "num_heads": 4,
+      "head_dim": 72,
+      "seq_lens": [
+        40560
+      ]
+    }
+  },
+  "20": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "num_heads": 8,
+      "head_dim": 128,
+      "seq_lens": [
+        1
+      ]
+    }
+  }
+}

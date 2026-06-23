@@ -1,0 +1,57 @@
+---
+---
+
+<div class="page-section">
+  <div class="page-container">
+    <div class="space-y-6">
+      <div class="card">
+        <div class="flex items-center gap-3 mb-4">
+          <div class="w-8 h-8 rounded-lg bg-brand-900/50 flex items-center justify-center text-brand-400">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"/></svg>
+          </div>
+          <h3 class="subsection-heading !mb-0" data-i18n="quickstart.docker.title">Run with Docker</h3>
+        </div>
+        <p class="text-gray-400 text-sm mb-3" data-i18n="quickstart.docker.desc">
+          The ROCm runtime image bundles PyTorch, AITER, FlyDSL, and evaluation tools.
+        </p>
+        <pre class="code-block"><code>docker run -it --rm \
+    --device=/dev/kfd --device=/dev/dri --group-add video \
+    -e ANTHROPIC_API_KEY -e OPENAI_API_KEY \
+    -v $PWD:/workspace \
+    <YOUR_REGISTRY>/atrex-bench:rocm7.2</code></pre>
+      </div>
+
+      <div class="card">
+        <div class="flex items-center gap-3 mb-4">
+          <div class="w-8 h-8 rounded-lg bg-blue-900/50 flex items-center justify-center text-blue-400">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          </div>
+          <h3 class="subsection-heading !mb-0" data-i18n="quickstart.eval.title">Run Evaluation</h3>
+        </div>
+        <p class="text-gray-400 text-sm mb-3" data-i18n="quickstart.eval.desc">
+          Evaluate a candidate kernel against a reference operator.
+        </p>
+        <pre class="code-block"><code>python scripts/run_eval.py \
+  --input path/to/candidate.py \
+  --reference-dir data/fused_moe \
+  --output results/run</code></pre>
+      </div>
+
+      <div class="card">
+        <div class="flex items-center gap-3 mb-4">
+          <div class="w-8 h-8 rounded-lg bg-purple-900/50 flex items-center justify-center text-purple-400">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          </div>
+          <h3 class="subsection-heading !mb-0" data-i18n="quickstart.gen.title">Generate Kernel</h3>
+        </div>
+        <p class="text-gray-400 text-sm mb-3" data-i18n="quickstart.gen.desc">
+          Use an LLM CLI to generate a candidate kernel from a reference.
+        </p>
+        <pre class="code-block"><code>python scripts/run_generate.py \
+  --operator fused_moe \
+  --backend triton \
+  --cli codex</code></pre>
+      </div>
+    </div>
+  </div>
+</div>

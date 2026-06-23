@@ -1,0 +1,44 @@
+{
+  "0": {
+    "init_kwargs": {
+      "nhead": 128,
+      "kv_lora_rank": 512,
+      "qk_rope_head_dim": 64
+    },
+    "input_kwargs": {
+      "batch_size": 4,
+      "ctx_len": 128,
+      "nhead": 128,
+      "kv_lora_rank": 512,
+      "qk_rope_head_dim": 64
+    }
+  },
+  "1": {
+    "init_kwargs": {
+      "nhead": 16,
+      "kv_lora_rank": 512,
+      "qk_rope_head_dim": 64
+    },
+    "input_kwargs": {
+      "batch_size": 1,
+      "ctx_len": 256,
+      "nhead": 16,
+      "kv_lora_rank": 512,
+      "qk_rope_head_dim": 64
+    }
+  },
+  "2": {
+    "init_kwargs": {
+      "nhead": 16,
+      "kv_lora_rank": 512,
+      "qk_rope_head_dim": 64
+    },
+    "input_kwargs": {
+      "batch_size": 7,
+      "ctx_len": 256,
+      "nhead": 16,
+      "kv_lora_rank": 512,
+      "qk_rope_head_dim": 64
+    }
+  }
+}

@@ -1,0 +1,92 @@
+{
+  "0": {
+    "init_kwargs": {
+      "num_heads": 32,
+      "num_kv_heads": 4,
+      "head_dim": 128,
+      "rope_dim": 128
+    },
+    "input_kwargs": {
+      "total_tokens": 1,
+      "num_heads": 32,
+      "num_kv_heads": 4,
+      "head_dim": 128,
+      "dtype": "bf16"
+    }
+  },
+  "1": {
+    "init_kwargs": {
+      "num_heads": 40,
+      "num_kv_heads": 8,
+      "head_dim": 128,
+      "rope_dim": 128
+    },
+    "input_kwargs": {
+      "total_tokens": 1,
+      "num_heads": 40,
+      "num_kv_heads": 8,
+      "head_dim": 128,
+      "dtype": "fp16"
+    }
+  },
+  "2": {
+    "init_kwargs": {
+      "num_heads": 64,
+      "num_kv_heads": 8,
+      "head_dim": 128,
+      "rope_dim": 128
+    },
+    "input_kwargs": {
+      "total_tokens": 1,
+      "num_heads": 64,
+      "num_kv_heads": 8,
+      "head_dim": 128,
+      "dtype": "fp16"
+    }
+  },
+  "3": {
+    "init_kwargs": {
+      "num_heads": 32,
+      "num_kv_heads": 8,
+      "head_dim": 128,
+      "rope_dim": 128
+    },
+    "input_kwargs": {
+      "total_tokens": 1,
+      "num_heads": 32,
+      "num_kv_heads": 8,
+      "head_dim": 128,
+      "dtype": "fp16"
+    }
+  },
+  "5": {
+    "init_kwargs": {
+      "num_heads": 32,
+      "num_kv_heads": 4,
+      "head_dim": 128,
+      "rope_dim": 128
+    },
+    "input_kwargs": {
+      "total_tokens": 1,
+      "num_heads": 32,
+      "num_kv_heads": 4,
+      "head_dim": 128,
+      "dtype": "fp16"
+    }
+  },
+  "6": {
+    "init_kwargs": {
+      "num_heads": 40,
+      "num_kv_heads": 8,
+      "head_dim": 128,
+      "rope_dim": 128
+    },
+    "input_kwargs": {
+      "total_tokens": 1,
+      "num_heads": 40,
+      "num_kv_heads": 8,
+      "head_dim": 128,
+      "dtype": "bf16"
+    }
+  }
+}

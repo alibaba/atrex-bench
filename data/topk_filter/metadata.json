@@ -1,0 +1,92 @@
+{
+  "id": "atrex_030",
+  "status": "curated",
+  "dtype": "fp32",
+  "input_dtypes": {
+    "logits": "fp32"
+  },
+  "output_dtypes": {
+    "out": "fp32"
+  },
+  "origin": {
+    "framework": "vllm",
+    "symbol": "void flashinfer::sampling::TopKMaskLogitsKernel<1024u, (cub::CUB_200700_900_NS::BlockReduceAlgorithm)2, 4u, float, int>(float*, float*, int*, unsigned int, unsigned int)",
+    "module": "Sampler.forward"
+  },
+  "shapes": {
+    "0": {
+      "description": "(vLLM), top-k logit filter, shape=(1,151936)",
+      "origin_kernel": "flashinfer_sampling",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 299.68
+      }
+    },
+    "1": {
+      "description": "(vLLM), top-k logit filter, shape=(1,152064)",
+      "origin_kernel": "flashinfer_sampling",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 328.64
+      }
+    },
+    "2": {
+      "description": "(vLLM), top-k logit filter, shape=(922,2048)",
+      "origin_kernel": "flashinfer_sampling",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 187.44
+      }
+    },
+    "3": {
+      "description": "(SGLang), top-k logit filter, shape=(3,4002)",
+      "origin_kernel": "flashinfer_sampling",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 31.32
+      }
+    },
+    "4": {
+      "description": "(SGLang), top-k logit filter, shape=(4098,4096)",
+      "origin_kernel": "flashinfer_sampling",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 805.14
+      }
+    },
+    "5": {
+      "description": "(SGLang), top-k logit filter, shape=(8179,4096)",
+      "origin_kernel": "flashinfer_sampling",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 2010.05
+      }
+    },
+    "6": {
+      "description": "(SGLang), top-k logit filter, shape=(15381,4096)",
+      "origin_kernel": "flashinfer_sampling",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 2932.64
+      }
+    },
+    "7": {
+      "description": "(SGLang), top-k logit filter, shape=(3,4215)",
+      "origin_kernel": "flashinfer_sampling",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 30.69
+      }
+    }
+  },
+  "phase": "decode",
+  "importance_score": 0.035326
+}

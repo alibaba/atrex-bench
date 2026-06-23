@@ -1,0 +1,173 @@
+{
+  "0": {
+    "init_kwargs": {
+      "group_size": 128
+    },
+    "input_kwargs": {
+      "token_count": 1,
+      "hidden_size": 2048
+    }
+  },
+  "1": {
+    "init_kwargs": {
+      "group_size": 128
+    },
+    "input_kwargs": {
+      "token_count": 37504,
+      "hidden_size": 2048
+    }
+  },
+  "2": {
+    "init_kwargs": {
+      "group_size": 128
+    },
+    "input_kwargs": {
+      "token_count": 75008,
+      "hidden_size": 2048
+    }
+  },
+  "3": {
+    "init_kwargs": {
+      "group_size": 128
+    },
+    "input_kwargs": {
+      "token_count": 85632,
+      "hidden_size": 2048
+    }
+  },
+  "4": {
+    "init_kwargs": {
+      "group_size": 128
+    },
+    "input_kwargs": {
+      "token_count": 128192,
+      "hidden_size": 2048
+    }
+  },
+  "5": {
+    "init_kwargs": {
+      "group_size": 128
+    },
+    "input_kwargs": {
+      "token_count": 256896,
+      "hidden_size": 2048
+    }
+  },
+  "6": {
+    "init_kwargs": {
+      "group_size": 128
+    },
+    "input_kwargs": {
+      "token_count": 500736,
+      "hidden_size": 2048
+    }
+  },
+  "7": {
+    "init_kwargs": {
+      "group_size": 128
+    },
+    "input_kwargs": {
+      "token_count": 1029056,
+      "hidden_size": 2048
+    }
+  },
+  "8": {
+    "init_kwargs": {
+      "group_size": 128
+    },
+    "input_kwargs": {
+      "token_count": 2058112,
+      "hidden_size": 2048
+    }
+  },
+  "9": {
+    "init_kwargs": {
+      "group_size": 128
+    },
+    "input_kwargs": {
+      "token_count": 3087168,
+      "hidden_size": 2048
+    }
+  },
+  "10": {
+    "init_kwargs": {
+      "group_size": 128
+    },
+    "input_kwargs": {
+      "token_count": 1,
+      "hidden_size": 7168
+    }
+  },
+  "11": {
+    "init_kwargs": {
+      "group_size": 128
+    },
+    "input_kwargs": {
+      "token_count": 726,
+      "hidden_size": 7168
+    }
+  },
+  "12": {
+    "init_kwargs": {
+      "group_size": 128
+    },
+    "input_kwargs": {
+      "token_count": 969,
+      "hidden_size": 7168
+    }
+  },
+  "13": {
+    "init_kwargs": {
+      "group_size": 128
+    },
+    "input_kwargs": {
+      "token_count": 1933,
+      "hidden_size": 7168
+    }
+  },
+  "14": {
+    "init_kwargs": {
+      "group_size": 128
+    },
+    "input_kwargs": {
+      "token_count": 4192,
+      "hidden_size": 7168
+    }
+  },
+  "15": {
+    "init_kwargs": {
+      "group_size": 128
+    },
+    "input_kwargs": {
+      "token_count": 8667,
+      "hidden_size": 7168
+    }
+  },
+  "16": {
+    "init_kwargs": {
+      "group_size": 128
+    },
+    "input_kwargs": {
+      "token_count": 16768,
+      "hidden_size": 7168
+    }
+  },
+  "17": {
+    "init_kwargs": {
+      "group_size": 128
+    },
+    "input_kwargs": {
+      "token_count": 40448,
+      "hidden_size": 7168
+    }
+  },
+  "18": {
+    "init_kwargs": {
+      "group_size": 128
+    },
+    "input_kwargs": {
+      "token_count": 58688,
+      "hidden_size": 7168
+    }
+  }
+}

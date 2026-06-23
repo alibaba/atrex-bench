@@ -1,0 +1,62 @@
+{
+  "0": {
+    "init_kwargs": {
+      "top_k": 50
+    },
+    "input_kwargs": {
+      "seq_len": 1,
+      "hidden_size": 151936
+    }
+  },
+  "1": {
+    "init_kwargs": {
+      "top_k": 50
+    },
+    "input_kwargs": {
+      "seq_len": 1,
+      "hidden_size": 152064
+    }
+  },
+  "2": {
+    "init_kwargs": {},
+    "input_kwargs": {
+      "seq_len": 922,
+      "hidden_size": 2048
+    }
+  },
+  "3": {
+    "init_kwargs": {},
+    "input_kwargs": {
+      "seq_len": 3,
+      "hidden_size": 4002
+    }
+  },
+  "4": {
+    "init_kwargs": {},
+    "input_kwargs": {
+      "seq_len": 4098,
+      "hidden_size": 4096
+    }
+  },
+  "5": {
+    "init_kwargs": {},
+    "input_kwargs": {
+      "seq_len": 8179,
+      "hidden_size": 4096
+    }
+  },
+  "6": {
+    "init_kwargs": {},
+    "input_kwargs": {
+      "seq_len": 15381,
+      "hidden_size": 4096
+    }
+  },
+  "7": {
+    "init_kwargs": {},
+    "input_kwargs": {
+      "seq_len": 3,
+      "hidden_size": 4215
+    }
+  }
+}

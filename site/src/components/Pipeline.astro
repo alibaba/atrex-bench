@@ -1,0 +1,119 @@
+---
+---
+
+<div class="page-section">
+  <div class="page-container">
+
+    <!-- ── Three-stage gate ── -->
+    <div class="grid md:grid-cols-3 gap-4 mb-12">
+      <div class="card relative">
+        <div class="absolute -top-3 left-6 badge bg-brand-900/80 text-brand-300 border-brand-700 text-xs font-mono">Stage 0</div>
+        <div class="pt-2">
+          <h3 class="subsection-heading" data-i18n="pipeline.stage0.title">Stage 0: Compilation</h3>
+          <p lang="en" class="text-gray-400 text-sm">
+            Import the candidate module and verify compilation produces an artifact for each shape. For FlyDSL this means a completed ahead-of-time MLIR compilation, not merely a module that imports. Per-shape compile pass is what makes this gate informative — the old import-level gate silently passed fallback modules.
+          </p>
+          </div>
+        <div class="hidden md:block absolute -right-3 top-1/2 -translate-y-1/2 text-gray-600 z-10">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+        </div>
+      </div>
+
+      <div class="card relative">
+        <div class="absolute -top-3 left-6 badge bg-blue-900/80 text-blue-300 border-blue-700 text-xs font-mono">Stage 1</div>
+        <div class="pt-2">
+          <h3 class="subsection-heading" data-i18n="pipeline.stage1.title">Stage 1: Correctness</h3>
+          <p lang="en" class="text-gray-400 text-sm">
+            Compare candidate output against PyTorch reference over K random seeds (default K=5) with tolerances atol=1e-2, rtol=5e-2. A shape counts as correct only when all seeds pass. This multi-seed check is essential — silent numeric mismatch (right shape/dtype, wrong values) is the dominant failure mode.
+          </p>
+          </div>
+        <div class="hidden md:block absolute -right-3 top-1/2 -translate-y-1/2 text-gray-600 z-10">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+        </div>
+      </div>
+
+      <div class="card relative">
+        <div class="absolute -top-3 left-6 badge bg-purple-900/80 text-purple-300 border-purple-700 text-xs font-mono">Stage 2</div>
+        <div class="pt-2">
+          <h3 class="subsection-heading" data-i18n="pipeline.stage2.title">Stage 2: Performance</h3>
+          <p lang="en" class="text-gray-400 text-sm">
+            Measured in a controlled sandbox with frequency lock, per-iteration L2 flush, and per-shape subprocess isolation. 10 warmup + 100 timed iterations; median wall-clock becomes T_cand. Only kernels reaching this stage contribute to the roofline score S.
+          </p>
+          </div>
+      </div>
+    </div>
+
+    <!-- ── Roofline scoring ── -->
+    <h2 class="section-heading">
+      <span >Roofline Scoring Methodology</span>
+      Roofline Scoring
+    </h2>
+
+    <p lang="en" class="text-gray-400 mb-6">
+      The roofline model expresses achievable performance as the minimum of compute-bound and memory-bandwidth-bound ceilings, parameterized by arithmetic intensity. Hardware peaks are calibrated per accelerator; per-problem semantic FLOPs and bytes are derived from the reference implementation. The per-accelerator roofline time T_roofline is stored in <code class="text-brand-400">roofline.json</code> and serves as the denominator in the scoring formula.
+    </p>
+    <div class="grid md:grid-cols-2 gap-6 mb-12">
+      <div class="card">
+        <h3 class="subsection-heading">
+          <span >Per-Kernel Score</span>
+          Single-Kernel Score
+        </h3>
+        <div class="space-y-3 font-mono text-sm">
+          <div class="p-3 rounded-lg bg-gray-800/50">
+            <div class="text-gray-500 text-xs mb-1">Roofline bound</div>
+            <code class="text-brand-300">T_roofline = max(W/P_peak, Q/B_peak)</code>
+          </div>
+          <div class="p-3 rounded-lg bg-gray-800/50">
+            <div class="text-gray-500 text-xs mb-1">
+              <span >Per-kernel achievement</span>
+              Per-kernel Achievement
+            </div>
+            <code class="text-brand-300">S = T_roofline / T_candidate</code>
+          </div>
+          <div class="p-3 rounded-lg bg-gray-800/50">
+            <div class="text-gray-500 text-xs mb-1">
+              <span >Importance-weighted aggregate</span>
+              Importance-Weighted Aggregate
+            </div>
+            <code class="text-brand-300">S_agg = &Sigma; w_i &middot; S_i</code>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 class="subsection-heading" data-i18n="pipeline.metrics.title">Core Metrics</h3>
+        <div class="space-y-3">
+          <div class="flex items-start gap-3 p-3 rounded-lg bg-gray-800/50">
+            <code class="text-brand-400 font-mono text-sm shrink-0 mt-0.5">compile_pass</code>
+            <span class="text-gray-400 text-sm">Per-shape artifact-based compilation check</span>
+            
+          </div>
+          <div class="flex items-start gap-3 p-3 rounded-lg bg-gray-800/50">
+            <code class="text-blue-400 font-mono text-sm shrink-0 mt-0.5">correctness</code>
+            <span class="text-gray-400 text-sm">Multi-seed numerical correctness verification</span>
+            
+          </div>
+          <div class="flex items-start gap-3 p-3 rounded-lg bg-gray-800/50">
+            <code class="text-purple-400 font-mono text-sm shrink-0 mt-0.5">S (roofline)</code>
+            <span class="text-gray-400 text-sm">T_roofline / T_candidate — how close to hardware ceiling</span>
+            
+          </div>
+          <div class="flex items-start gap-3 p-3 rounded-lg bg-gray-800/50">
+            <code class="text-amber-400 font-mono text-sm shrink-0 mt-0.5">vs. production</code>
+            <span class="text-gray-400 text-sm">Candidate time vs deployed production kernel time</span>
+            
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Anti-hacking ── -->
+    <h2 class="section-heading">
+      <span >Anti-Hacking by Construction</span>
+      
+    </h2>
+    <p lang="en" class="text-gray-400 mb-4">
+      The generation workspace never sees <code class="text-brand-400">metadata.json</code> (upstream symbol and provenance) or <code class="text-brand-400">roofline.json</code> (SOL bounds and W/Q values), so a model can neither retrieve the reference implementation by name nor fit its output to the scoring formula. What this isolation leaves available is specification shortcutting — satisfying the PyTorch reference with a non-DSL implementation — which the DSL-adoption metric makes visible rather than hiding.
+    </p>
+    </div>
+</div>

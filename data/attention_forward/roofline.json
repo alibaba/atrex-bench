@@ -1,0 +1,235 @@
+{
+  "shapes": {
+    "0": {
+      "semantic_W_flops": {
+        "bf16": 2388787200
+      },
+      "semantic_Q_read_bytes": 4976656,
+      "semantic_Q_write_bytes": 1658880,
+      "SOL_time_ms": {
+        "XPU-A": 0.01026772920696325,
+        "XPU-B": 0.016140454054054055
+      }
+    },
+    "1": {
+      "semantic_W_flops": {
+        "bf16": 6635520000
+      },
+      "semantic_Q_read_bytes": 8294416,
+      "semantic_Q_write_bytes": 2764800,
+      "SOL_time_ms": {
+        "XPU-A": 0.028521470019342358,
+        "XPU-B": 0.044834594594594594
+      }
+    },
+    "2": {
+      "semantic_W_flops": {
+        "bf16": 20632117248
+      },
+      "semantic_Q_read_bytes": 14625808,
+      "semantic_Q_write_bytes": 4875264,
+      "SOL_time_ms": {
+        "XPU-A": 0.08868307435203095,
+        "XPU-B": 0.1394061976216216
+      }
+    },
+    "3": {
+      "semantic_W_flops": {
+        "bf16": 68089356288
+      },
+      "semantic_Q_read_bytes": 26569744,
+      "semantic_Q_write_bytes": 8856576,
+      "SOL_time_ms": {
+        "XPU-A": 0.2926686279303675,
+        "XPU-B": 0.4600632181621621
+      }
+    },
+    "4": {
+      "semantic_W_flops": {
+        "bf16": 305024237568
+      },
+      "semantic_Q_read_bytes": 56236048,
+      "semantic_Q_write_bytes": 18745344,
+      "SOL_time_ms": {
+        "XPU-A": 1.3110863424371373,
+        "XPU-B": 2.060974578162162
+      }
+    },
+    "5": {
+      "semantic_W_flops": {
+        "bf16": 1378490646528
+      },
+      "semantic_Q_read_bytes": 119549968,
+      "semantic_Q_write_bytes": 39849984,
+      "SOL_time_ms": {
+        "XPU-A": 5.925169338181819,
+        "XPU-B": 9.314125990054054
+      }
+    },
+    "6": {
+      "semantic_W_flops": {
+        "bf16": 2736227745792
+      },
+      "semantic_Q_read_bytes": 168431632,
+      "semantic_Q_write_bytes": 56143872,
+      "SOL_time_ms": {
+        "XPU-A": 11.76113365911025,
+        "XPU-B": 18.488025309405405
+      }
+    },
+    "7": {
+      "semantic_W_flops": {
+        "bf16": 11334588899328
+      },
+      "semantic_Q_read_bytes": 342807568,
+      "semantic_Q_write_bytes": 114269184,
+      "SOL_time_ms": {
+        "XPU-A": 48.71948806932302,
+        "XPU-B": 76.5850601305946
+      }
+    },
+    "8": {
+      "semantic_W_flops": {
+        "bf16": 19803290738688
+      },
+      "semantic_Q_read_bytes": 453123088,
+      "semantic_Q_write_bytes": 151041024,
+      "SOL_time_ms": {
+        "XPU-A": 85.12052756796905,
+        "XPU-B": 133.80601850464865
+      }
+    },
+    "9": {
+      "semantic_W_flops": {
+        "bf16": 4592346136576
+      },
+      "semantic_Q_read_bytes": 411451408,
+      "semantic_Q_write_bytes": 137150464,
+      "SOL_time_ms": {
+        "XPU-A": 19.739291367186762,
+        "XPU-B": 31.029365787675676
+      }
+    },
+    "10": {
+      "semantic_W_flops": {
+        "bf16": 15535453782016
+      },
+      "semantic_Q_read_bytes": 756768784,
+      "semantic_Q_write_bytes": 252256256,
+      "SOL_time_ms": {
+        "XPU-A": 66.7760747131571,
+        "XPU-B": 104.96928231091891
+      }
+    },
+    "11": {
+      "semantic_W_flops": {
+        "bf16": 87754752
+      },
+      "semantic_Q_read_bytes": 476944,
+      "semantic_Q_write_bytes": 158976,
+      "SOL_time_ms": {
+        "XPU-A": 0.00037719644100580273,
+        "XPU-B": 0.0005929375135135135
+      }
+    },
+    "12": {
+      "semantic_W_flops": {
+        "bf16": 414720000
+      },
+      "semantic_Q_read_bytes": 1036816,
+      "semantic_Q_write_bytes": 345600,
+      "SOL_time_ms": {
+        "XPU-A": 0.0017825918762088974,
+        "XPU-B": 0.002802162162162162
+      }
+    },
+    "13": {
+      "semantic_W_flops": {
+        "bf16": 1179813888
+      },
+      "semantic_Q_read_bytes": 1748752,
+      "semantic_Q_write_bytes": 582912,
+      "SOL_time_ms": {
+        "XPU-A": 0.005071196595744681,
+        "XPU-B": 0.007971715459459459
+      }
+    },
+    "14": {
+      "semantic_W_flops": {
+        "bf16": 4719255552
+      },
+      "semantic_Q_read_bytes": 3497488,
+      "semantic_Q_write_bytes": 1165824,
+      "SOL_time_ms": {
+        "XPU-A": 0.020284786382978724,
+        "XPU-B": 0.031886861837837836
+      }
+    },
+    "15": {
+      "semantic_W_flops": {
+        "bf16": 19365120000
+      },
+      "semantic_Q_read_bytes": 7084816,
+      "semantic_Q_write_bytes": 2361600,
+      "SOL_time_ms": {
+        "XPU-A": 0.08323713733075436,
+        "XPU-B": 0.1308454054054054
+      }
+    },
+    "16": {
+      "semantic_W_flops": {
+        "bf16": 77158490112
+      },
+      "semantic_Q_read_bytes": 14141968,
+      "semantic_Q_write_bytes": 4713984,
+      "SOL_time_ms": {
+        "XPU-A": 0.3316505055319149,
+        "XPU-B": 0.5213411494054054
+      }
+    },
+    "17": {
+      "semantic_W_flops": {
+        "bf16": 275911575552
+      },
+      "semantic_Q_read_bytes": 26742544,
+      "semantic_Q_write_bytes": 8914176,
+      "SOL_time_ms": {
+        "XPU-A": 1.1859513241005804,
+        "XPU-B": 1.8642674023783785
+      }
+    },
+    "18": {
+      "semantic_W_flops": {
+        "bf16": 717237854208
+      },
+      "semantic_Q_read_bytes": 43117072,
+      "semantic_Q_write_bytes": 14372352,
+      "SOL_time_ms": {
+        "XPU-A": 3.0829050256092843,
+        "XPU-B": 4.846201717621621
+      }
+    },
+    "19": {
+      "semantic_W_flops": {
+        "bf16": 1895170867200
+      },
+      "semantic_Q_read_bytes": 70087696,
+      "semantic_Q_write_bytes": 23362560,
+      "SOL_time_ms": {
+        "XPU-A": 8.146017052224371,
+        "XPU-B": 12.805208562162163
+      }
+    },
+    "20": {
+      "semantic_W_flops": {
+        "bf16": 4096
+      },
+      "semantic_Q_read_bytes": 6160,
+      "semantic_Q_write_bytes": 2048,
+      "SOL_time_ms": {
+        "XPU-A": 1.548679245283019e-06,
+        "XPU-B": 2.0520000000000004e-06
+      }
+    }
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "0": {
+    "init_kwargs": {
+      "routed_scaling_factor": 1.0
+    },
+    "input_kwargs": {
+      "token_count": 11027,
+      "top_k": 8,
+      "hidden_size": 2048
+    }
+  },
+  "1": {
+    "init_kwargs": {
+      "routed_scaling_factor": 1.0
+    },
+    "input_kwargs": {
+      "token_count": 6030,
+      "top_k": 8,
+      "hidden_size": 2048
+    }
+  },
+  "2": {
+    "init_kwargs": {
+      "routed_scaling_factor": 1.0
+    },
+    "input_kwargs": {
+      "token_count": 5983,
+      "top_k": 8,
+      "hidden_size": 2048
+    }
+  },
+  "3": {
+    "init_kwargs": {
+      "routed_scaling_factor": 1.0
+    },
+    "input_kwargs": {
+      "token_count": 5043,
+      "top_k": 8,
+      "hidden_size": 2048
+    }
+  },
+  "4": {
+    "init_kwargs": {
+      "routed_scaling_factor": 1.0
+    },
+    "input_kwargs": {
+      "token_count": 4996,
+      "top_k": 8,
+      "hidden_size": 2048
+    }
+  },
+  "5": {
+    "init_kwargs": {
+      "routed_scaling_factor": 1.0
+    },
+    "input_kwargs": {
+      "token_count": 4363,
+      "top_k": 8,
+      "hidden_size": 2048
+    }
+  },
+  "6": {
+    "init_kwargs": {
+      "routed_scaling_factor": 1.0
+    },
+    "input_kwargs": {
+      "token_count": 4195,
+      "top_k": 8,
+      "hidden_size": 2048
+    }
+  }
+}

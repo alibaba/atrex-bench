@@ -1,0 +1,160 @@
+{
+  "metadata": {
+    "num_profiles": 1303,
+    "frameworks": [
+      "all"
+    ]
+  },
+  "operators": {
+    "unified_attention": {
+      "importance_score": 0.394972,
+      "phase": "prefill/decode",
+      "num_profiles": 94
+    },
+    "fused_moe": {
+      "importance_score": 0.113586,
+      "phase": "prefill/decode",
+      "num_profiles": 297
+    },
+    "block_scaled_mm": {
+      "importance_score": 0.093155,
+      "phase": "prefill/decode",
+      "num_profiles": 519
+    },
+    "fp8_blockscale_fused_moe": {
+      "importance_score": 0.051305,
+      "phase": "prefill/decode",
+      "num_profiles": 104
+    },
+    "paged_attention_decode": {
+      "importance_score": 0.044119,
+      "phase": "decode",
+      "num_profiles": 332
+    },
+    "reshape_and_cache": {
+      "importance_score": 0.043524,
+      "phase": "prefill/decode",
+      "num_profiles": 453
+    },
+    "topk_filter": {
+      "importance_score": 0.035326,
+      "phase": "decode",
+      "num_profiles": 240
+    },
+    "gated_delta_rule_update": {
+      "importance_score": 0.034959,
+      "phase": "decode",
+      "num_profiles": 217
+    },
+    "fused_qkv_rope": {
+      "importance_score": 0.033527,
+      "phase": "prefill/decode",
+      "num_profiles": 870
+    },
+    "rms_norm": {
+      "importance_score": 0.027508,
+      "phase": "prefill/decode",
+      "num_profiles": 1043
+    },
+    "mla_decode_attention": {
+      "importance_score": 0.022828,
+      "phase": "decode",
+      "num_profiles": 9
+    },
+    "attention_forward": {
+      "importance_score": 0.022438,
+      "phase": "prefill",
+      "num_profiles": 927
+    },
+    "causal_conv1d": {
+      "importance_score": 0.021834,
+      "phase": "prefill",
+      "num_profiles": 143
+    },
+    "moe_topk_gating_softmax": {
+      "importance_score": 0.020529,
+      "phase": "prefill/decode",
+      "num_profiles": 398
+    },
+    "fused_qk_rmsnorm": {
+      "importance_score": 0.018695,
+      "phase": "prefill/decode",
+      "num_profiles": 309
+    },
+    "silu_and_mul": {
+      "importance_score": 0.017601,
+      "phase": "prefill/decode",
+      "num_profiles": 850
+    },
+    "chunk_gated_delta_rule_state": {
+      "importance_score": 0.015735,
+      "phase": "prefill",
+      "num_profiles": 150
+    },
+    "fused_add_rms_norm": {
+      "importance_score": 0.011487,
+      "phase": "prefill/decode",
+      "num_profiles": 760
+    },
+    "moe_align_block_size": {
+      "importance_score": 0.011082,
+      "phase": "prefill/decode",
+      "num_profiles": 294
+    },
+    "mrope": {
+      "importance_score": 0.010032,
+      "phase": "prefill/decode",
+      "num_profiles": 6
+    },
+    "chunk_delta_rule_output": {
+      "importance_score": 0.008234,
+      "phase": "prefill",
+      "num_profiles": 114
+    },
+    "fp8_dynamic_per_token_quant": {
+      "importance_score": 0.008223,
+      "phase": "prefill/decode",
+      "num_profiles": 467
+    },
+    "linear_sigmoid_mul": {
+      "importance_score": 0.007234,
+      "phase": "prefill/decode",
+      "num_profiles": 71
+    },
+    "per_token_group_quant_fp8": {
+      "importance_score": 0.005308,
+      "phase": "prefill/decode",
+      "num_profiles": 49
+    },
+    "gated_rms_norm": {
+      "importance_score": 0.004735,
+      "phase": "prefill/decode",
+      "num_profiles": 60
+    },
+    "l2_norm": {
+      "importance_score": 0.004661,
+      "phase": "prefill/decode",
+      "num_profiles": 28
+    },
+    "moe_count_and_sort": {
+      "importance_score": 0.004544,
+      "phase": "prefill/decode",
+      "num_profiles": 39
+    },
+    "fused_rmsnorm_quant": {
+      "importance_score": 0.003433,
+      "phase": "prefill/decode",
+      "num_profiles": 86
+    },
+    "moe_sum_reduce": {
+      "importance_score": 0.003393,
+      "phase": "prefill/decode",
+      "num_profiles": 116
+    },
+    "layer_norm": {
+      "importance_score": 0.000773,
+      "phase": "prefill/decode",
+      "num_profiles": 2
+    }
+  }
+}

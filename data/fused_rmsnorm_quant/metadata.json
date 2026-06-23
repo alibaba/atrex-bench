@@ -1,0 +1,126 @@
+{
+  "id": "atrex_012",
+  "status": "trace_reference",
+  "dtype": "fp8_e4m3",
+  "input_dtypes": {
+    "x": "bf16",
+    "residual": "bf16",
+    "weight": "bf16"
+  },
+  "output_dtypes": {
+    "quantized": "fp8_e4m3",
+    "scale": "fp32",
+    "residual_out": "bf16"
+  },
+  "origin": {
+    "framework": "aiter",
+    "symbol": "rmsnorm2d_fwd_with_add_dynamicquant",
+    "module": "aiter.ops.rmsnorm"
+  },
+  "phase": "prefill/decode",
+  "importance_score": 0.003433,
+  "shapes": {
+    "0": {
+      "description": "(sglang TP1), fused RMSNorm + FP8 quant, input=(117,2048)",
+      "source_framework": "sglang",
+      "call_count": 2,
+      "total_duration_us": null,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 7.89
+      }
+    },
+    "1": {
+      "description": "(sglang TP1), fused RMSNorm + FP8 quant, input=(837,2048)",
+      "source_framework": "sglang",
+      "call_count": 59,
+      "total_duration_us": null,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 11.13
+      }
+    },
+    "2": {
+      "description": "(sglang TP1), fused RMSNorm + FP8 quant, input=(1769,2048)",
+      "source_framework": "sglang",
+      "call_count": 59,
+      "total_duration_us": null,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 15.92
+      }
+    },
+    "3": {
+      "description": "(SGLang TP1), fused RMSNorm + FP8 quant, input=(3260,2048)",
+      "source_framework": "sglang",
+      "call_count": 10,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 23.37
+      }
+    },
+    "4": {
+      "description": "(SGLang TP1), fused RMSNorm + FP8 quant, input=(11399,2048)",
+      "source_framework": "sglang",
+      "call_count": 80,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 65.07
+      }
+    },
+    "5": {
+      "description": "(SGLang TP1), fused RMSNorm + FP8 quant, input=(26080,2048)",
+      "source_framework": "sglang",
+      "call_count": 10,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 140.92
+      }
+    },
+    "6": {
+      "description": "(SGLang TP8), fused RMSNorm + FP8 quant, input=(650,4096)",
+      "source_framework": "sglang",
+      "call_count": 120,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 13.47
+      }
+    },
+    "7": {
+      "description": "(SGLang TP8), fused RMSNorm + FP8 quant, input=(1013,4096)",
+      "source_framework": "sglang",
+      "call_count": 120,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 16.64
+      }
+    },
+    "8": {
+      "description": "(SGLang TP8), fused RMSNorm + FP8 quant, input=(2058,4096)",
+      "source_framework": "sglang",
+      "call_count": 120,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 27.41
+      }
+    },
+    "9": {
+      "description": "(SGLang TP8), fused RMSNorm + FP8 quant, input=(4083,4096)",
+      "source_framework": "sglang",
+      "call_count": 120,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 46.97
+      }
+    },
+    "10": {
+      "description": "(SGLang TP8), fused RMSNorm + FP8 quant, input=(8208,4096)",
+      "source_framework": "sglang",
+      "call_count": 120,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 86.45
+      }
+    }
+  }
+}

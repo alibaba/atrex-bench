@@ -1,0 +1,49 @@
+# Atrex-Bench NVIDIA (CUDA) image.
+#
+# Bundles the full runtime for evaluating / generating kernels on an NVIDIA GPU host:
+#   PyTorch (CUDA), Triton, Gluon, CuteDSL, Node 22, and the Claude Code / Codex CLIs.
+#
+#   Build:  docker build -f docker/Dockerfile.cuda -t atrex-bench:cuda12.8 .
+#   Run:    see README.md  ->  "Docker (CUDA)"
+#
+# The base image is the official PyTorch + CUDA build on Docker Hub:
+#   https://hub.docker.com/r/pytorch/pytorch
+ARG BASE_IMAGE=pytorch/pytorch:2.10.0-cuda12.8-cudnn9-devel
+FROM ${BASE_IMAGE}
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git cmake ninja-build build-essential curl ca-certificates \
+        vim less htop tmux \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node.js 22 (required by the Claude Code / Codex CLIs the generation harness drives)
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/* \
+    && npm install -g @anthropic-ai/claude-code @openai/codex
+
+WORKDIR /opt
+
+# Optional PyPI mirror for faster builds on restricted / regional networks
+# (defaults to the public index, so external builds are unaffected). Override e.g.:
+#   --build-arg PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ARG PIP_INDEX_URL=https://pypi.org/simple
+ENV PIP_INDEX_URL=${PIP_INDEX_URL}
+
+# This CUDA base installs PyTorch into the *system* Python (Ubuntu 24.04 /
+# python3.12, no conda), which pip flags as PEP 668 "externally managed". We
+# install Triton / CuteDSL next to that same torch on purpose, so override the
+# guard with --break-system-packages.
+#
+# Triton compiler (ships with Gluon ≥ v3.4.0).
+RUN pip install --break-system-packages "triton>=3.4.0"
+
+# CuteDSL -- NVIDIA CUTLASS 4.x Python DSL (https://pypi.org/project/nvidia-cutlass-dsl/).
+RUN pip install --break-system-packages nvidia-cutlass-dsl
+
+WORKDIR /workspace
+CMD ["/bin/bash"]

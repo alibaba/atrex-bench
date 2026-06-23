@@ -1,0 +1,79 @@
+{
+  "id": "atrex_023",
+  "status": "trace_reference",
+  "dtype": "bf16",
+  "input_dtypes": {
+    "q": "bf16",
+    "k": "bf16",
+    "cos": "fp32",
+    "sin": "fp32"
+  },
+  "output_dtypes": {
+    "q": "bf16",
+    "k": "bf16"
+  },
+  "origin": {
+    "framework": "vllm/sglang",
+    "symbol": "triton_mrope",
+    "module": "vllm.model_executor.layers.rotary_embedding.mrope"
+  },
+  "phase": "prefill/decode",
+  "importance_score": 0.010032,
+  "shapes": {
+    "0": {
+      "description": "(vLLM TP2), tokens=3592 heads=16/1 head_dim=128",
+      "shape_key": "(3592,2048)",
+      "call_count": 48,
+      "total_duration_us": 5329.0,
+      "source_framework": "vllm",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 46.05
+      }
+    },
+    "1": {
+      "description": "(vLLM TP2), tokens=8373 heads=16/1 head_dim=128",
+      "shape_key": "(8373,2048)",
+      "call_count": 48,
+      "total_duration_us": 11332.0,
+      "source_framework": "vllm",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 78.32
+      }
+    },
+    "2": {
+      "description": "(vLLM TP2), tokens=16530 heads=16/1 head_dim=128",
+      "shape_key": "(16530,2048)",
+      "call_count": 48,
+      "total_duration_us": 17216.0,
+      "source_framework": "vllm",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 139.01
+      }
+    },
+    "3": {
+      "description": "(sglang), tokens=838 heads=16/4 head_dim=128",
+      "shape_key": "(3,838)",
+      "call_count": 8,
+      "total_duration_us": 250.0,
+      "source_framework": "sglang",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 17.7
+      }
+    },
+    "4": {
+      "description": "(sglang), tokens=1673 heads=16/4 head_dim=128",
+      "shape_key": "(3,1673)",
+      "call_count": 8,
+      "total_duration_us": 446.0,
+      "source_framework": "sglang",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 28.41
+      }
+    }
+  }
+}

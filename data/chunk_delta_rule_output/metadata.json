@@ -1,0 +1,174 @@
+{
+  "id": "atrex_004",
+  "status": "trace_reference",
+  "dtype": "bf16",
+  "input_dtypes": {
+    "q": "bf16",
+    "k": "bf16",
+    "v": "bf16",
+    "h": "bf16",
+    "g": "fp32"
+  },
+  "output_dtypes": {
+    "out": "bf16"
+  },
+  "origin": {
+    "framework": "sglang/vllm",
+    "symbol": "chunk_fwd_o",
+    "module": "sglang.srt.layers.attention.fla.chunk_o"
+  },
+  "phase": "prefill",
+  "importance_score": 0.008234,
+  "shapes": {
+    "0": {
+      "description": "(vLLM TP1), chunk output, tokens=64 heads=16/32 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 60,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 20.16
+      }
+    },
+    "1": {
+      "description": "(vLLM TP1), chunk output, tokens=128 heads=16/32 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 60,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 23.94
+      }
+    },
+    "2": {
+      "description": "(vLLM TP1), chunk output, tokens=256 heads=16/32 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 60,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 37.06
+      }
+    },
+    "3": {
+      "description": "(vLLM TP1), chunk output, tokens=512 heads=16/32 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 21,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 57.9
+      }
+    },
+    "4": {
+      "description": "(vLLM TP1), chunk output, tokens=1024 heads=16/32 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 21,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 97.24
+      }
+    },
+    "5": {
+      "description": "(vLLM TP1), chunk output, tokens=2048 heads=16/32 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 30,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 190.46
+      }
+    },
+    "6": {
+      "description": "(vLLM TP1), chunk output, tokens=4096 heads=16/32 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 21,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 372.91
+      }
+    },
+    "7": {
+      "description": "(vLLM TP1), chunk output, tokens=8192 heads=16/32 dim=128/128",
+      "source_framework": "vllm",
+      "call_count": 42,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 725.55
+      }
+    },
+    "8": {
+      "description": "(SGLang TP8), chunk output, tokens=704 heads=8/16 dim=128/128",
+      "source_framework": "sglang",
+      "call_count": 90,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 46.68
+      }
+    },
+    "9": {
+      "description": "(SGLang TP8), chunk output, tokens=1024 heads=8/16 dim=128/128",
+      "source_framework": "sglang",
+      "call_count": 45,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 59.89
+      }
+    },
+    "10": {
+      "description": "(SGLang TP8), chunk output, tokens=2112 heads=8/16 dim=128/128",
+      "source_framework": "sglang",
+      "call_count": 45,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 103.14
+      }
+    },
+    "11": {
+      "description": "(SGLang TP8), chunk output, tokens=4096 heads=8/16 dim=128/128",
+      "source_framework": "sglang",
+      "call_count": 45,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 195.84
+      }
+    },
+    "12": {
+      "description": "(SGLang TP8), chunk output, tokens=8256 heads=8/16 dim=128/128",
+      "source_framework": "sglang",
+      "call_count": 45,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 384.97
+      }
+    },
+    "13": {
+      "description": "(SGLang/vLLM), chunk output, tokens=4195 heads=16/32 dim=128/128",
+      "shape_key": "(1,4195,16,128)",
+      "call_count": 30,
+      "total_duration_us": 7826.0,
+      "source_framework": "sglang/vllm",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 403.61
+      }
+    },
+    "14": {
+      "description": "(SGLang/vLLM), chunk output, tokens=11027 heads=16/32 dim=128/128",
+      "shape_key": "(1,11027,16,128)",
+      "call_count": 30,
+      "total_duration_us": 22529.0,
+      "source_framework": "sglang/vllm",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 1055.08
+      }
+    },
+    "15": {
+      "description": "(SGLang/vLLM), chunk output, tokens=14807 heads=16/32 dim=128/128",
+      "shape_key": "(1,14807,16,128)",
+      "call_count": 30,
+      "total_duration_us": 30543.0,
+      "source_framework": "sglang/vllm",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 1291.56
+      }
+    }
+  }
+}

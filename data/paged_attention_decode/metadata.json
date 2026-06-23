@@ -1,0 +1,96 @@
+{
+  "id": "atrex_024",
+  "status": "trace_reference",
+  "dtype": "bf16",
+  "input_dtypes": {
+    "query": "bf16/fp16",
+    "k_cache": "bf16/fp16",
+    "v_cache": "bf16/fp16",
+    "block_tables": "int32",
+    "seq_lens": "int32"
+  },
+  "output_dtypes": {
+    "out": "bf16/fp16"
+  },
+  "origin": {
+    "framework": "rtp-llm",
+    "symbol": "paged_attention_rocm",
+    "module": "aiter.paged_attention_rocm"
+  },
+  "phase": "decode",
+  "importance_score": 0.044119,
+  "shapes": {
+    "0": {
+      "description": "(vLLM), decode paged attention, heads=16/16 head_dim=128 ctx_len=64",
+      "origin_kernel": "reduce",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 152.6
+      }
+    },
+    "1": {
+      "description": "(SGLang TP1), decode paged attention, heads=16/2 head_dim=256",
+      "source_framework": "sglang",
+      "call_count": 5970,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 17.06
+      }
+    },
+    "2": {
+      "description": "(vLLM), decode paged attention, heads=3/3 head_dim=128 ctx_len=64",
+      "origin_kernel": "reduce",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 24.73
+      }
+    },
+    "3": {
+      "description": "(rtp-llm TP1), decode paged attention, heads=32/4 head_dim=128",
+      "source_framework": "rtp-llm",
+      "tensor_parallel_size": 1,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 15.6
+      }
+    },
+    "4": {
+      "description": "(rtp-llm TP1), decode paged attention, heads=32/8 head_dim=128",
+      "source_framework": "rtp-llm",
+      "tensor_parallel_size": 1,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 15.67
+      }
+    },
+    "5": {
+      "description": "(SGLang TP8), decode paged attention, heads=4/1 head_dim=128",
+      "source_framework": "sglang",
+      "call_count": 465,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 15.18
+      }
+    },
+    "6": {
+      "description": "(rtp-llm TP1), decode paged attention, heads=40/8 head_dim=128",
+      "source_framework": "rtp-llm",
+      "tensor_parallel_size": 1,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 15.75
+      }
+    },
+    "7": {
+      "description": "(rtp-llm TP1), decode paged attention, heads=64/8 head_dim=128",
+      "source_framework": "rtp-llm",
+      "tensor_parallel_size": 1,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 15.52
+      }
+    }
+  }
+}

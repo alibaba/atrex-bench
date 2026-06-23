@@ -1,0 +1,58 @@
+{
+  "0": {
+    "init_kwargs": {
+      "head_num": 64,
+      "kv_head_num": 8,
+      "size_per_head": 128
+    },
+    "input_kwargs": {
+      "num_tokens": 1,
+      "head_num": 64,
+      "kv_head_num": 8,
+      "size_per_head": 128,
+      "dtype": "fp16"
+    }
+  },
+  "1": {
+    "init_kwargs": {
+      "head_num": 32,
+      "kv_head_num": 8,
+      "size_per_head": 128
+    },
+    "input_kwargs": {
+      "num_tokens": 1,
+      "head_num": 32,
+      "kv_head_num": 8,
+      "size_per_head": 128,
+      "dtype": "fp16"
+    }
+  },
+  "3": {
+    "init_kwargs": {
+      "head_num": 32,
+      "kv_head_num": 4,
+      "size_per_head": 128
+    },
+    "input_kwargs": {
+      "num_tokens": 1,
+      "head_num": 32,
+      "kv_head_num": 4,
+      "size_per_head": 128,
+      "dtype": "fp16"
+    }
+  },
+  "4": {
+    "init_kwargs": {
+      "head_num": 40,
+      "kv_head_num": 8,
+      "size_per_head": 128
+    },
+    "input_kwargs": {
+      "num_tokens": 1,
+      "head_num": 40,
+      "kv_head_num": 8,
+      "size_per_head": 128,
+      "dtype": "fp16"
+    }
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "id": "atrex_018",
+  "status": "trace_reference",
+  "dtype": "bf16",
+  "input_dtypes": {
+    "q": "bf16",
+    "kv_cache": "bf16",
+    "seq_lens": "int32"
+  },
+  "output_dtypes": {
+    "out": "bf16"
+  },
+  "origin": {
+    "framework": "aiter",
+    "symbol": "mla_decode_stage1_asm_fwd",
+    "module": "aiter.mla"
+  },
+  "phase": "decode",
+  "importance_score": 0.022828,
+  "shapes": {
+    "0": {
+      "description": "(sglang TP2), MLA decode attention, nhead=128 kv_lora_rank=512 rope_dim=64",
+      "source_framework": "sglang",
+      "call_count": 15533,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 46.71
+      }
+    },
+    "1": {
+      "description": "(SGLang TP8), MLA decode attention, grid=(0,0,0)",
+      "source_framework": "sglang",
+      "call_count": 17751,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 18.98
+      }
+    },
+    "2": {
+      "description": "(SGLang TP8), MLA decode attention, grid=(7,1,1)",
+      "source_framework": "sglang",
+      "call_count": 61,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 21.03
+      }
+    }
+  }
+}

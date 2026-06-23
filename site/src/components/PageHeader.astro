@@ -1,0 +1,16 @@
+---
+interface Props {
+  titleKey: string;
+  titleFallback: string;
+  subtitleKey: string;
+  subtitleFallback: string;
+}
+const { titleKey, titleFallback, subtitleKey, subtitleFallback } = Astro.props;
+---
+
+<header class="page-section pb-0">
+  <div class="page-container">
+    <h1 class="page-title" data-i18n={titleKey}>{titleFallback}</h1>
+    <p class="page-subtitle" data-i18n={subtitleKey}>{subtitleFallback}</p>
+  </div>
+</header>

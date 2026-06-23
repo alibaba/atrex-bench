@@ -1,0 +1,114 @@
+{
+  "id": "atrex_017",
+  "status": "trace_reference",
+  "dtype": "bf16",
+  "input_dtypes": {
+    "hidden_states": "bf16",
+    "weight": "bf16",
+    "bias": "bf16",
+    "post_mul_mat": "bf16"
+  },
+  "output_dtypes": {
+    "out": "bf16"
+  },
+  "origin": {
+    "framework": "sglang",
+    "symbol": "sgl_kernel.fused_linear_sigmoid_mul",
+    "module": "sglang.srt.models.qwen2_moe"
+  },
+  "importance_score": 0.007234,
+  "phase": "prefill/decode",
+  "shapes": {
+    "0": {
+      "description": "(SGLang TP inferred), shared expert gate, hidden_states=(8037,4096) out=4096",
+      "shape_key": "(8037,4096)",
+      "call_count": 60,
+      "total_duration_us": 3905.0,
+      "source_framework": "sglang",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 1604.42
+      }
+    },
+    "1": {
+      "description": "(SGLang TP inferred), shared expert gate, hidden_states=(6717,4096) out=4096",
+      "shape_key": "(6717,4096)",
+      "call_count": 60,
+      "total_duration_us": 3256.0,
+      "source_framework": "sglang",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 1265.84
+      }
+    },
+    "2": {
+      "description": "(SGLang TP inferred), shared expert gate, hidden_states=(4001,4096) out=4096",
+      "shape_key": "(4001,4096)",
+      "call_count": 60,
+      "total_duration_us": 2005.0,
+      "source_framework": "sglang",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 2059.27
+      }
+    },
+    "3": {
+      "description": "(SGLang TP inferred), shared expert gate, hidden_states=(15381,4096) out=4096",
+      "shape_key": "(15381,4096)",
+      "call_count": 60,
+      "total_duration_us": 7935.0,
+      "source_framework": "sglang",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 7205.33
+      }
+    },
+    "4": {
+      "description": "(SGLang TP inferred), shared expert gate, hidden_states=(6576,4096) out=4096",
+      "shape_key": "(6576,4096)",
+      "call_count": 60,
+      "total_duration_us": 3285.0,
+      "source_framework": "sglang",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 1260.53
+      }
+    },
+    "5": {
+      "description": "(SGLang TP1), shared expert gate, hidden_states=(1,2048) out=2048",
+      "source_framework": "sglang",
+      "call_count": 8240,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 20.92
+      }
+    },
+    "6": {
+      "description": "(SGLang TP1), shared expert gate, hidden_states=(90,2048) out=2048",
+      "source_framework": "sglang",
+      "call_count": 40,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 32.16
+      }
+    },
+    "7": {
+      "description": "(SGLang TP1), shared expert gate, hidden_states=(13,2048) out=2048",
+      "source_framework": "sglang",
+      "call_count": 40,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 17.29
+      }
+    },
+    "8": {
+      "description": "(SGLang TP8), shared expert gate, hidden_states=(2748,4096) out=4096",
+      "source_framework": "sglang",
+      "call_count": 2748,
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 564.52
+      }
+    }
+  }
+}

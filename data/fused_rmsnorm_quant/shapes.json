@@ -1,0 +1,79 @@
+{
+  "0": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 117,
+      "hidden_size": 2048
+    }
+  },
+  "1": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 837,
+      "hidden_size": 2048
+    }
+  },
+  "2": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 1769,
+      "hidden_size": 2048
+    }
+  },
+  "3": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 3260,
+      "hidden_size": 2048
+    }
+  },
+  "4": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 11399,
+      "hidden_size": 2048
+    }
+  },
+  "5": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 26080,
+      "hidden_size": 2048
+    }
+  },
+  "6": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 650,
+      "hidden_size": 4096
+    }
+  },
+  "7": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 1013,
+      "hidden_size": 4096
+    }
+  },
+  "8": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 2058,
+      "hidden_size": 4096
+    }
+  },
+  "9": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 4083,
+      "hidden_size": 4096
+    }
+  },
+  "10": {
+    "init_kwargs": null,
+    "input_kwargs": {
+      "token_count": 8208,
+      "hidden_size": 4096
+    }
+  }
+}

@@ -1,0 +1,15 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import PageHeader from '../../components/PageHeader.astro';
+import DataFormat from '../../components/DataFormat.astro';
+---
+
+<Layout title="Data Format — Atrex-Bench">
+  <PageHeader
+    titleKey="dataformat.title"
+    titleFallback="Data Format"
+    subtitleKey="dataformat.intro"
+    subtitleFallback="Each benchmark sample is an operator directory with five files following a strict contract."
+  />
+  <DataFormat />
+</Layout>

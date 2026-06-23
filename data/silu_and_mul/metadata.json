@@ -1,0 +1,355 @@
+{
+  "id": "atrex_029",
+  "status": "trace_reference",
+  "dtype": "bf16",
+  "input_dtypes": {
+    "x": "bf16"
+  },
+  "output_dtypes": {
+    "out": "bf16"
+  },
+  "origin": {
+    "framework": "vllm",
+    "symbol": "vllm_silu_and_mul",
+    "module": "vllm._C.silu_and_mul / csrc/activation_kernels.cu"
+  },
+  "phase": "prefill/decode",
+  "importance_score": 0.017601,
+  "shapes": {
+    "0": {
+      "description": "(rtp-llm TP1), text decoder MoE expert gated SiLU, shape=(1,1536)",
+      "source_framework": "rtp-llm",
+      "tensor_parallel_size": 1,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 7.57
+      }
+    },
+    "1": {
+      "description": "(SGLang TP1), text decoder gated SiLU activation, shape=(1630,1536)",
+      "source_framework": "sglang",
+      "call_count": 40,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 12.18
+      }
+    },
+    "2": {
+      "description": "(vLLM TP1), text decoder gated SiLU activation, shape=(4688,1536)",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 21.23
+      }
+    },
+    "3": {
+      "description": "(vLLM TP1), text decoder gated SiLU activation, shape=(10704,1536)",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 38.09
+      }
+    },
+    "4": {
+      "description": "(vLLM TP1), text decoder gated SiLU activation, shape=(16024,1536)",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 52.63
+      }
+    },
+    "5": {
+      "description": "(vLLM TP1), text decoder gated SiLU activation, shape=(24656,1536)",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 76.23
+      }
+    },
+    "6": {
+      "description": "(vLLM TP1), text decoder gated SiLU activation, shape=(49032,1536)",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 143.76
+      }
+    },
+    "7": {
+      "description": "(vLLM TP1), text decoder gated SiLU activation, shape=(128632,1536)",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 362.71
+      }
+    },
+    "8": {
+      "description": "(vLLM TP1), text decoder gated SiLU activation, shape=(175680,1536)",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 490.68
+      }
+    },
+    "9": {
+      "description": "(vLLM), gated SiLU activation, shape=(1,2048)",
+      "origin_kernel": "activation",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 7.53
+      }
+    },
+    "10": {
+      "description": "(sglang TP1), text decoder gated SiLU, shape=(183,2048)",
+      "source_framework": "sglang",
+      "call_count": 416,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 7.65
+      }
+    },
+    "11": {
+      "description": "(sglang TP1), text decoder gated SiLU, shape=(1113,2048)",
+      "source_framework": "sglang",
+      "call_count": 40,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 9.33
+      }
+    },
+    "12": {
+      "description": "(vLLM), gated SiLU activation, shape=(1,2560)",
+      "origin_kernel": "activation",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 7.55
+      }
+    },
+    "13": {
+      "description": "(vLLM), gated SiLU activation, shape=(1736,3072)",
+      "origin_kernel": "activation",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 15.18
+      }
+    },
+    "14": {
+      "description": "(vLLM), gated SiLU activation, shape=(5000,3072)",
+      "origin_kernel": "activation",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 31.36
+      }
+    },
+    "15": {
+      "description": "(vLLM TP4), text decoder gated SiLU activation, shape=(11570,3072)",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 63.24
+      }
+    },
+    "16": {
+      "description": "(vLLM TP4), text decoder gated SiLU activation, shape=(14320,3072)",
+      "source_framework": "vllm",
+      "call_count": 48,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 102.23
+      }
+    },
+    "17": {
+      "description": "(SGLang), gated SiLU activation, shape=(128,4096)",
+      "origin_kernel": "activation",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 7.73
+      }
+    },
+    "18": {
+      "description": "(SGLang), gated SiLU activation, shape=(256,4096)",
+      "origin_kernel": "activation",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 7.95
+      }
+    },
+    "19": {
+      "description": "(SGLang), gated SiLU activation, shape=(512,4096)",
+      "origin_kernel": "activation",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 9.11
+      }
+    },
+    "20": {
+      "description": "(vLLM), gated SiLU activation, shape=(1023,4096)",
+      "origin_kernel": "activation",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 12.51
+      }
+    },
+    "21": {
+      "description": "(vLLM TP4), text decoder gated SiLU activation, shape=(2044,4096)",
+      "shape_key": "(2044,4096)",
+      "call_count": 94,
+      "total_duration_us": 6335.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 19.52
+      }
+    },
+    "22": {
+      "description": "(vLLM), gated SiLU activation, shape=(4093,4096)",
+      "origin_kernel": "activation",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 33.14
+      }
+    },
+    "23": {
+      "description": "(vLLM TP4), text decoder gated SiLU activation, shape=(8192,4096)",
+      "shape_key": "(8192,4096)",
+      "call_count": 1974,
+      "total_duration_us": 162399.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 58.27
+      }
+    },
+    "24": {
+      "description": "(vLLM), gated SiLU activation, shape=(16418,4096)",
+      "origin_kernel": "activation",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 109.64
+      }
+    },
+    "25": {
+      "description": "(vLLM), gated SiLU activation, shape=(20538,4096)",
+      "origin_kernel": "activation",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 135.69
+      }
+    },
+    "26": {
+      "description": "(vLLM), gated SiLU activation, shape=(528,5120)",
+      "origin_kernel": "activation",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 12.29
+      }
+    },
+    "27": {
+      "description": "(vLLM), gated SiLU activation, shape=(1056,5120)",
+      "origin_kernel": "activation",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 19.37
+      }
+    },
+    "28": {
+      "description": "(vLLM), gated SiLU activation, shape=(1910,5120)",
+      "origin_kernel": "activation",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 29.46
+      }
+    },
+    "29": {
+      "description": "(SGLang), gated SiLU activation, shape=(4177,5120)",
+      "origin_kernel": "activation",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 56.98
+      }
+    },
+    "30": {
+      "description": "(vLLM), gated SiLU activation, shape=(8192,5120)",
+      "origin_kernel": "activation",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 105.06
+      }
+    },
+    "31": {
+      "description": "(vLLM), gated SiLU activation, shape=(540,8192)",
+      "origin_kernel": "activation",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 12.89
+      }
+    },
+    "32": {
+      "description": "(vLLM), gated SiLU activation, shape=(1003,8192)",
+      "origin_kernel": "activation",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 19.37
+      }
+    },
+    "33": {
+      "description": "(vLLM), gated SiLU activation, shape=(2046,8192)",
+      "origin_kernel": "activation",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 33.2
+      }
+    },
+    "34": {
+      "description": "(SGLang), gated SiLU activation, shape=(4098,8192)",
+      "origin_kernel": "activation",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 58.93
+      }
+    },
+    "35": {
+      "description": "(SGLang), gated SiLU activation, shape=(8179,8192)",
+      "origin_kernel": "activation",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 110.81
+      }
+    },
+    "36": {
+      "description": "(SGLang), gated SiLU activation, shape=(15381,8192)",
+      "origin_kernel": "activation",
+      "source_repo": "atrex-bench",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 202.59
+      }
+    }
+  }
+}

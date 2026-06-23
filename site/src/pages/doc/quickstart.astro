@@ -1,0 +1,15 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import PageHeader from '../../components/PageHeader.astro';
+import QuickStart from '../../components/QuickStart.astro';
+---
+
+<Layout title="Quick Start — Atrex-Bench">
+  <PageHeader
+    titleKey="quickstart.title"
+    titleFallback="Quick Start"
+    subtitleKey="quickstart.intro"
+    subtitleFallback="Get up and running with Atrex-Bench in minutes using Docker and the built-in CLI tools."
+  />
+  <QuickStart />
+</Layout>

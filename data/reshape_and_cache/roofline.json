@@ -1,0 +1,92 @@
+{
+  "shapes": {
+    "0": {
+      "semantic_W_flops": {
+        "bf16": 0
+      },
+      "semantic_Q_read_bytes": 34824,
+      "semantic_Q_write_bytes": 32768,
+      "SOL_time_ms": {
+        "XPU-A": 1.275320754716981e-05,
+        "XPU-B": 1.6898e-05
+      }
+    },
+    "1": {
+      "semantic_W_flops": {
+        "bf16": 0
+      },
+      "semantic_Q_read_bytes": 590976,
+      "semantic_Q_write_bytes": 294912,
+      "SOL_time_ms": {
+        "XPU-A": 0.000167148679245283,
+        "XPU-B": 0.000221472
+      }
+    },
+    "2": {
+      "semantic_W_flops": {
+        "bf16": 0
+      },
+      "semantic_Q_read_bytes": 4130752,
+      "semantic_Q_write_bytes": 2097152,
+      "SOL_time_ms": {
+        "XPU-A": 0.0011750762264150943,
+        "XPU-B": 0.001556976
+      }
+    },
+    "3": {
+      "semantic_W_flops": {
+        "bf16": 0
+      },
+      "semantic_Q_read_bytes": 8589376,
+      "semantic_Q_write_bytes": 4325376,
+      "SOL_time_ms": {
+        "XPU-A": 0.0024367456603773584,
+        "XPU-B": 0.0032286880000000004
+      }
+    },
+    "4": {
+      "semantic_W_flops": {
+        "bf16": 0
+      },
+      "semantic_Q_read_bytes": 16711608,
+      "semantic_Q_write_bytes": 8388608,
+      "SOL_time_ms": {
+        "XPU-A": 0.004735889811320755,
+        "XPU-B": 0.006275054
+      }
+    },
+    "5": {
+      "semantic_W_flops": {
+        "bf16": 0
+      },
+      "semantic_Q_read_bytes": 33538016,
+      "semantic_Q_write_bytes": 16777216,
+      "SOL_time_ms": {
+        "XPU-A": 0.00949344,
+        "XPU-B": 0.012578808
+      }
+    },
+    "6": {
+      "semantic_W_flops": {
+        "bf16": 0
+      },
+      "semantic_Q_read_bytes": 16867424,
+      "semantic_Q_write_bytes": 8421376,
+      "SOL_time_ms": {
+        "XPU-A": 0.004771471698113207,
+        "XPU-B": 0.0063222
+      }
+    },
+    "7": {
+      "semantic_W_flops": {
+        "bf16": 0
+      },
+      "semantic_Q_read_bytes": 33619968,
+      "semantic_Q_write_bytes": 16777216,
+      "SOL_time_ms": {
+        "XPU-A": 0.009508902641509434,
+        "XPU-B": 0.012599296000000001
+      }
+    }
+  }
+}

@@ -1,0 +1,81 @@
+{
+  "id": "atrex_019",
+  "status": "trace_reference",
+  "dtype": "int32",
+  "input_dtypes": {
+    "topk_ids": "int32"
+  },
+  "output_dtypes": {
+    "sorted_token_ids": "int32",
+    "expert_ids": "int32",
+    "num_tokens_post_pad": "int32"
+  },
+  "origin": {
+    "framework": "vllm",
+    "symbol": "moe_align_block_size",
+    "module": "vllm.model_executor.layers.fused_moe.moe_align_block_size"
+  },
+  "phase": "prefill/decode",
+  "importance_score": 0.011082,
+  "shapes": {
+    "0": {
+      "description": "(vLLM TP1), MoE routing align_block_size, tokens=1 top_k=8 block_size=128",
+      "source_framework": "vllm",
+      "call_count": 2352,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 23.02
+      }
+    },
+    "2": {
+      "description": "(vLLM TP4), MoE routing align_block_size, tokens=520 top_k=8 block_size=128",
+      "shape_key": "(520,4096)",
+      "call_count": 94,
+      "total_duration_us": 840.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 41.96
+      }
+    },
+    "3": {
+      "description": "(vLLM TP4), MoE routing align_block_size, tokens=1019 top_k=8 block_size=128",
+      "shape_key": "(1019,4096)",
+      "call_count": 94,
+      "total_duration_us": 992.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 67.23
+      }
+    },
+    "4": {
+      "description": "(vLLM TP4), MoE routing align_block_size, tokens=2044 top_k=8 block_size=128",
+      "shape_key": "(2044,4096)",
+      "call_count": 94,
+      "total_duration_us": 1178.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 121.99
+      }
+    },
+    "5": {
+      "description": "(vLLM TP4), MoE routing align_block_size, tokens=3936 top_k=8 block_size=128",
+      "shape_key": "(3936,4096)",
+      "call_count": 94,
+      "total_duration_us": 1637.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 187.93
+      }
+    },
+    "6": {
+      "description": "(vLLM TP4), MoE routing align_block_size, tokens=8192 top_k=8 block_size=128",
+      "shape_key": "(8192,4096)",
+      "call_count": 1598,
+      "total_duration_us": 14393.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 400.39
+      }
+    }
+  }
+}

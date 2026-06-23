@@ -1,0 +1,97 @@
+{
+  "id": "atrex_021",
+  "status": "trace_reference",
+  "dtype": "bf16",
+  "input_dtypes": {
+    "expert_outputs": "bf16"
+  },
+  "output_dtypes": {
+    "out": "bf16"
+  },
+  "origin": {
+    "framework": "sglang",
+    "symbol": "moe_sum_reduce_triton",
+    "module": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe_triton_kernels"
+  },
+  "phase": "prefill/decode",
+  "importance_score": 0.003393,
+  "shapes": {
+    "0": {
+      "description": "(SGLang TP inferred), MoE top-8 expert sum, tokens=11027 hidden=2048",
+      "shape_key": "(11027,2048)",
+      "call_count": 40,
+      "total_duration_us": 12077.0,
+      "source_framework": "sglang",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 362.44
+      }
+    },
+    "1": {
+      "description": "(SGLang TP inferred), MoE top-8 expert sum, tokens=6030 hidden=2048",
+      "shape_key": "(6030,2048)",
+      "call_count": 40,
+      "total_duration_us": 6367.0,
+      "source_framework": "sglang",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 209.75
+      }
+    },
+    "2": {
+      "description": "(SGLang TP inferred), MoE top-8 expert sum, tokens=5983 hidden=2048",
+      "shape_key": "(5983,2048)",
+      "call_count": 40,
+      "total_duration_us": 6332.0,
+      "source_framework": "sglang",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 213.26
+      }
+    },
+    "3": {
+      "description": "(SGLang TP inferred), MoE top-8 expert sum, tokens=5043 hidden=2048",
+      "shape_key": "(5043,2048)",
+      "call_count": 40,
+      "total_duration_us": 5239.0,
+      "source_framework": "sglang",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 179.78
+      }
+    },
+    "4": {
+      "description": "(SGLang TP inferred), MoE top-8 expert sum, tokens=4996 hidden=2048",
+      "shape_key": "(4996,2048)",
+      "call_count": 40,
+      "total_duration_us": 5187.0,
+      "source_framework": "sglang",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 178.42
+      }
+    },
+    "5": {
+      "description": "(SGLang TP inferred), MoE top-8 expert sum, tokens=4363 hidden=2048",
+      "shape_key": "(4363,2048)",
+      "call_count": 40,
+      "total_duration_us": 4457.0,
+      "source_framework": "sglang",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 159.2
+      }
+    },
+    "6": {
+      "description": "(SGLang TP inferred), MoE top-8 expert sum, tokens=4195 hidden=2048",
+      "shape_key": "(4195,2048)",
+      "call_count": 40,
+      "total_duration_us": 4274.0,
+      "source_framework": "sglang",
+      "production_performance": {
+        "framework": "sglang",
+        "performance_us": 153.98
+      }
+    }
+  }
+}

@@ -1,0 +1,119 @@
+{
+  "id": "atrex_022",
+  "status": "trace_reference",
+  "dtype": "fp32",
+  "input_dtypes": {
+    "gating_output": "fp32"
+  },
+  "output_dtypes": {
+    "topk_weights": "fp32",
+    "topk_ids": "int32"
+  },
+  "origin": {
+    "framework": "vllm",
+    "symbol": "moe_topk_gating_softmax",
+    "module": "vllm._custom_ops"
+  },
+  "phase": "prefill/decode",
+  "importance_score": 0.020529,
+  "shapes": {
+    "0": {
+      "description": "(rtp-llm TP1), MoE routing topk_gating_softmax, tokens=1 experts=128",
+      "source_framework": "rtp-llm",
+      "tensor_parallel_size": 1,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 11.44
+      }
+    },
+    "1": {
+      "description": "(vLLM TP1), MoE routing topk_gating_softmax, tokens=129 experts=128",
+      "source_framework": "vllm",
+      "call_count": 28,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 12.84
+      }
+    },
+    "2": {
+      "description": "(vLLM TP1), MoE routing topk_gating_softmax, tokens=256 experts=128",
+      "source_framework": "vllm",
+      "call_count": 112,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 13.0
+      }
+    },
+    "3": {
+      "description": "(vLLM TP4), MoE routing topk_gating_softmax, tokens=520 experts=128",
+      "shape_key": "(520,4096)",
+      "call_count": 94,
+      "total_duration_us": 1002.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 13.02
+      }
+    },
+    "4": {
+      "description": "(vLLM TP4), MoE routing topk_gating_softmax, tokens=1019 experts=128",
+      "shape_key": "(1019,4096)",
+      "call_count": 94,
+      "total_duration_us": 1090.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 13.14
+      }
+    },
+    "5": {
+      "description": "(vLLM TP4), MoE routing topk_gating_softmax, tokens=2044 experts=128",
+      "shape_key": "(2044,4096)",
+      "call_count": 94,
+      "total_duration_us": 1275.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 13.34
+      }
+    },
+    "6": {
+      "description": "(SGLang TP8), MoE routing topk_gating_softmax, tokens=4083 experts=128",
+      "source_framework": "sglang",
+      "call_count": 60,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 17.11
+      }
+    },
+    "7": {
+      "description": "(vLLM TP4), MoE routing topk_gating_softmax, tokens=8192 experts=128",
+      "shape_key": "(8192,4096)",
+      "call_count": 1880,
+      "total_duration_us": 29200.0,
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 25.55
+      }
+    },
+    "8": {
+      "description": "(vLLM TP inferred), MoE routing topk_softmax, tokens=8037 experts=256",
+      "shape_key": "(8037,4096)",
+      "call_count": 60,
+      "total_duration_us": 9133.0,
+      "source_framework": "vllm",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 39.4
+      }
+    },
+    "9": {
+      "description": "(vLLM TP inferred), MoE routing topk_softmax, tokens=13526 experts=256",
+      "shape_key": "(13526,4096)",
+      "call_count": 60,
+      "total_duration_us": 15128.0,
+      "source_framework": "vllm",
+      "production_performance": {
+        "framework": "aiter",
+        "performance_us": 56.22
+      }
+    }
+  }
+}

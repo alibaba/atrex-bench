@@ -1,0 +1,452 @@
+---
+import operatorData from '../data/operators.json';
+const { operators, hardware } = operatorData;
+
+const hwShort: Record<string, string> = {
+  'XPU-A': 'XPU-A',
+  'XPU-B': 'XPU-B',
+};
+
+const prodHardware = ['XPU-A', 'XPU-B'];
+
+type PerHw = Record<string, number | null>;
+
+type ShapeEntry = {
+  id: string;
+  description: string;
+  sol: PerHw;
+  prod_us: number | null;
+  s: PerHw;
+};
+
+type OpRow = {
+  name: string;
+  dtype: string;
+  phase: string;
+  shapeCount: number;
+  medianSol: PerHw;
+  medianProd: number | null;
+  medianS: PerHw;
+  shapes: ShapeEntry[];
+};
+
+const rows: OpRow[] = [];
+
+const median = (arr: number[]) => {
+  if (arr.length === 0) return null;
+  const sorted = [...arr].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+};
+
+for (const op of operators as any[]) {
+  const rs = op.roofline_shapes || {};
+  const ps = op.production_shapes || {};
+  const shapeIds = Object.keys(rs).sort((a, b) => parseInt(a) - parseInt(b));
+  if (shapeIds.length === 0) continue;
+
+  const shapes: ShapeEntry[] = [];
+  const solsByHw: Record<string, number[]> = {};
+  const sByHw: Record<string, number[]> = {};
+  const prods: number[] = [];
+
+  for (const hw of hardware as string[]) {
+    solsByHw[hw] = [];
+    sByHw[hw] = [];
+  }
+
+  for (const sid of shapeIds) {
+    const r = rs[sid];
+    const prod_us = ps[sid] ?? null;
+    if (prod_us != null) prods.push(prod_us);
+
+    const sol: PerHw = {};
+    const s: PerHw = {};
+    for (const hw of hardware as string[]) {
+      const v = r.SOL_time_ms?.[hw] ?? null;
+      sol[hw] = v;
+      if (v != null) solsByHw[hw].push(v);
+      const ratio = v != null && prod_us != null && prod_us > 0 ? v / prod_us : null;
+      s[hw] = ratio;
+      if (ratio != null) sByHw[hw].push(ratio);
+    }
+
+    shapes.push({ id: sid, description: r.description || `shape ${sid}`, sol, prod_us, s });
+  }
+
+  const medianSol: PerHw = {};
+  const medianS: PerHw = {};
+  for (const hw of hardware as string[]) {
+    medianSol[hw] = median(solsByHw[hw]);
+    medianS[hw] = median(sByHw[hw]);
+  }
+
+  rows.push({
+    name: op.name, dtype: op.dtype, phase: op.phase || '',
+    shapeCount: shapes.length, medianSol, medianProd: median(prods), medianS, shapes,
+  });
+}
+
+const defaultHw = prodHardware[0];
+rows.sort((a, b) => (a.medianS[defaultHw] ?? 0) - (b.medianS[defaultHw] ?? 0));
+
+function useMsUnit(sol_us: number | null): boolean {
+  return sol_us != null && sol_us >= 1000;
+}
+
+function fmtAs(us: number | null, ms: boolean): string {
+  if (us == null) return '—';
+  return ms ? (us / 1000).toFixed(1) + ' ms' : us.toFixed(1) + ' us';
+}
+
+function fmtS(s: number | null): string {
+  if (s == null) return '—';
+  return (s * 100).toFixed(1) + '%';
+}
+
+function sBadgeCls(s: number | null): string {
+  if (s == null) return 'bg-gray-800 text-gray-500 border-gray-700';
+  if (s > 1.0) return 'bg-white/20 text-white border-white/40';
+  if (s >= 0.33) return 'bg-emerald-900/40 text-emerald-300 border-emerald-800';
+  if (s >= 0.125) return 'bg-amber-900/40 text-amber-300 border-amber-800';
+  return 'bg-red-900/40 text-red-300 border-red-800';
+}
+
+function sTextCls(s: number | null): string {
+  if (s == null) return 'text-gray-600';
+  if (s > 1.0) return 'text-white font-semibold';
+  if (s >= 0.33) return 'text-emerald-400';
+  if (s >= 0.125) return 'text-amber-400';
+  return 'text-red-400';
+}
+
+function barCls(s: number | null): string {
+  if (s == null) return 'bg-gray-700';
+  if (s > 1.0) return 'bg-white';
+  if (s >= 0.33) return 'bg-emerald-500';
+  if (s >= 0.125) return 'bg-amber-500';
+  return 'bg-red-500';
+}
+
+function barW(s: number | null): number {
+  if (s == null || s <= 0) return 0;
+  return Math.min(s * 100, 100);
+}
+---
+
+<div class="page-section">
+  <div class="page-container">
+    <h2 class="section-heading !mt-0">
+      <span >SOL Ratio by Operator &times; Shape</span>
+      
+    </h2>
+    <p lang="en" class="text-gray-400 text-sm mb-2">
+      Click an operator to expand per-shape details. S = T<sub>SOL</sub> / T<sub>Prod</sub> — higher is better (100% = hardware limit).
+    </p>
+    <div class="flex items-center justify-end mb-3 gap-2">
+      <span class="text-xs text-gray-500">Hardware:</span>
+      <select id="sv-hw-select" class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:border-brand-600 focus:outline-none">
+        {prodHardware.map((hw: string) => (
+          <option value={hw}>{hwShort[hw] || hw}</option>
+        ))}
+        {(hardware as string[]).filter((hw: string) => !prodHardware.includes(hw)).map((hw: string) => (
+          <option value="" disabled>{hwShort[hw] || hw} (coming)</option>
+        ))}
+      </select>
+    </div>
+
+    <div class="card overflow-hidden p-0">
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs" id="shape-view-table">
+          <thead>
+            <tr class="border-b border-gray-800 bg-gray-900/50">
+              <th class="text-left py-2.5 px-3 text-gray-400 font-medium w-5"></th>
+              <th class="text-left py-2.5 px-3 text-gray-400 font-medium cursor-pointer hover:text-white select-none" data-sv-sort="name">
+                Operator
+              </th>
+              <th class="text-left py-2.5 px-3 text-gray-400 font-medium hidden sm:table-cell">dtype</th>
+              <th class="text-left py-2.5 px-3 text-gray-400 font-medium hidden md:table-cell">
+                Phase
+              </th>
+              <th class="text-right py-2.5 px-3 text-gray-400 font-medium cursor-pointer hover:text-white select-none" data-sv-sort="shapes">
+                Shapes
+              </th>
+              <th class="text-right py-2.5 px-3 text-gray-400 font-medium hidden lg:table-cell cursor-pointer hover:text-white select-none" data-sv-sort="sol">
+                T<sub>SOL</sub> (median)
+              </th>
+              <th class="text-right py-2.5 px-3 text-gray-400 font-medium hidden lg:table-cell cursor-pointer hover:text-white select-none" data-sv-sort="prod">
+                T<sub>Prod</sub> (median)
+              </th>
+              <th class="text-right py-2.5 px-3 text-gray-400 font-medium cursor-pointer hover:text-white select-none" data-sv-sort="s">
+                S (median)
+              </th>
+              <th class="py-2.5 px-3 text-gray-400 font-medium hidden sm:table-cell w-24"></th>
+            </tr>
+          </thead>
+          <tbody id="shape-view-tbody">
+            {rows.map((op) => {
+              const opMs = useMsUnit(op.medianSol[defaultHw]);
+              return (
+              <>
+                <tr class="border-b border-gray-800/30 hover:bg-gray-800/30 transition-colors cursor-pointer sv-operator-row"
+                    data-op={op.name} data-shapes={op.shapeCount}
+                    data-sol={op.medianSol[defaultHw] ?? 0}
+                    data-prod={op.medianProd ?? 0}
+                    data-s={op.medianS[defaultHw] ?? 0}
+                    data-sol-raw-hw={JSON.stringify(Object.fromEntries((hardware as string[]).map(hw => [hw, op.medianSol[hw]])))}
+                    data-s-hw={JSON.stringify(Object.fromEntries((hardware as string[]).map(hw => [hw, op.medianS[hw]])))}
+                    >
+                  <td class="py-2 px-3 text-gray-500 sv-chevron">&#x25B6;</td>
+                  <td class="py-2 px-3">
+                    <code class="text-white font-mono">{op.name}</code>
+                  </td>
+                  <td class="py-2 px-3 hidden sm:table-cell">
+                    <span class={`badge ${
+                      op.dtype === 'bf16' ? 'badge-bf16' :
+                      op.dtype === 'fp16' ? 'badge-fp16' :
+                      op.dtype.startsWith('fp8') ? 'badge-fp8' :
+                      op.dtype === 'fp32' ? 'badge-fp32' : 'badge-int32'
+                    }`}>{op.dtype}</span>
+                  </td>
+                  <td class="py-2 px-3 text-gray-400 hidden md:table-cell">{op.phase || '—'}</td>
+                  <td class="py-2 px-3 text-right text-gray-300">{op.shapeCount}</td>
+                  <td class="py-2 px-3 text-right font-mono text-gray-300 hidden lg:table-cell sv-sol-cell">
+                    {fmtAs(op.medianSol[defaultHw], opMs)}
+                  </td>
+                  <td class="py-2 px-3 text-right font-mono text-gray-300 hidden lg:table-cell sv-prod-cell">
+                    {fmtAs(op.medianProd, opMs)}
+                  </td>
+                  <td class="py-2 px-3 text-right sv-s-badge-cell">
+                    <span class={`badge text-xs ${sBadgeCls(op.medianS[defaultHw])}`}>
+                      {fmtS(op.medianS[defaultHw])}
+                    </span>
+                  </td>
+                  <td class="py-2 px-3 hidden sm:table-cell sv-bar-cell">
+                    <div class="w-20 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                      <div class={`h-full rounded-full ${barCls(op.medianS[defaultHw])}`}
+                           style={`width: ${barW(op.medianS[defaultHw])}%`}></div>
+                    </div>
+                  </td>
+                </tr>
+
+                {op.shapes.map((sh) => {
+                  const shMs = useMsUnit(sh.sol[defaultHw]);
+                  return (
+                  <tr class="hidden sv-shape-row border-b border-gray-800/10 bg-gray-900/30"
+                      data-parent={op.name}
+                      data-sol-raw-hw={JSON.stringify(Object.fromEntries((hardware as string[]).map(hw => [hw, sh.sol[hw]])))}
+                      data-prod-raw={sh.prod_us}
+                      data-s-hw={JSON.stringify(Object.fromEntries((hardware as string[]).map(hw => [hw, sh.s[hw]])))}
+                      >
+                    <td class="py-1.5 px-3"></td>
+                    <td class="py-1.5 px-3" colspan="4">
+                      <div class="pl-4 border-l-2 border-gray-800">
+                        <span class="text-gray-400 font-mono text-xs">#{sh.id}</span>
+                        <span class="text-gray-500 ml-2 text-xs">{sh.description}</span>
+                      </div>
+                    </td>
+                    <td class="py-1.5 px-3 text-right font-mono text-gray-400 hidden lg:table-cell sv-sol-cell">
+                      {fmtAs(sh.sol[defaultHw], shMs)}
+                    </td>
+                    <td class="py-1.5 px-3 text-right font-mono text-brand-300 hidden lg:table-cell sv-prod-cell">
+                      {fmtAs(sh.prod_us, shMs)}
+                    </td>
+                    <td class="py-1.5 px-3 text-right sv-s-text-cell">
+                      <span class={`font-mono text-xs ${sTextCls(sh.s[defaultHw])}`}>
+                        {fmtS(sh.s[defaultHw])}
+                      </span>
+                    </td>
+                    <td class="py-1.5 px-3 hidden sm:table-cell sv-bar-cell">
+                      <div class="w-20 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                        <div class={`h-full rounded-full ${barCls(sh.s[defaultHw])}`}
+                             style={`width: ${barW(sh.s[defaultHw])}%; opacity: 0.7`}></div>
+                      </div>
+                    </td>
+                  </tr>
+                  );
+                })}
+              </>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="flex flex-wrap gap-4 mt-4 text-xs text-gray-500">
+      <div class="flex items-center gap-1.5">
+        <span class="inline-block w-2.5 h-2.5 rounded-full bg-white border border-white/40"></span>
+        <span>&gt; 100%</span>
+      </div>
+      <div class="flex items-center gap-1.5">
+        <span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+        <span>33–100%</span>
+      </div>
+      <div class="flex items-center gap-1.5">
+        <span class="inline-block w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+        <span>12–33%</span>
+      </div>
+      <div class="flex items-center gap-1.5">
+        <span class="inline-block w-2.5 h-2.5 rounded-full bg-red-500"></span>
+        <span>&lt; 12%</span>
+      </div>
+      <span class="ml-auto">
+        <span >S = T<sub>SOL</sub> / T<sub>Prod</sub>. Higher = closer to hardware limit.</span>
+        
+      </span>
+    </div>
+  </div>
+</div>
+
+<script>
+  const tbody = document.getElementById('shape-view-tbody')!;
+  const hwSelect = document.getElementById('sv-hw-select') as HTMLSelectElement;
+
+  // Expand / collapse
+  tbody.querySelectorAll('.sv-operator-row').forEach(row => {
+    row.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).closest('select')) return;
+      const opName = (row as HTMLElement).dataset.op!;
+      const chevron = row.querySelector('.sv-chevron')!;
+      const shapes = tbody.querySelectorAll(`.sv-shape-row[data-parent="${opName}"]`);
+      const isExpanded = chevron.textContent?.trim() === '▼';
+
+      if (isExpanded) {
+        chevron.textContent = '▶';
+        shapes.forEach(s => s.classList.add('hidden'));
+        row.classList.remove('bg-gray-800/40');
+      } else {
+        chevron.textContent = '▼';
+        shapes.forEach(s => s.classList.remove('hidden'));
+        row.classList.add('bg-gray-800/40');
+      }
+    });
+  });
+
+  // Helpers
+  function fmtS(s: number | null): string {
+    if (s == null) return '—';
+    return (s * 100).toFixed(1) + '%';
+  }
+
+  function fmtAs(us: number | null, ms: boolean): string {
+    if (us == null) return '—';
+    return ms ? (us / 1000).toFixed(1) + ' ms' : us.toFixed(1) + ' us';
+  }
+
+  function sColorClass(s: number | null, badge: boolean): string {
+    if (badge) {
+      if (s == null) return 'bg-gray-800 text-gray-500 border-gray-700';
+      if (s > 1.0) return 'bg-white/20 text-white border-white/40';
+      if (s >= 0.33) return 'bg-emerald-900/40 text-emerald-300 border-emerald-800';
+      if (s >= 0.125) return 'bg-amber-900/40 text-amber-300 border-amber-800';
+      return 'bg-red-900/40 text-red-300 border-red-800';
+    }
+    if (s == null) return 'text-gray-600';
+    if (s > 1.0) return 'text-white font-semibold';
+    if (s >= 0.33) return 'text-emerald-400';
+    if (s >= 0.125) return 'text-amber-400';
+    return 'text-red-400';
+  }
+
+  function barColorClass(s: number | null): string {
+    if (s == null) return 'bg-gray-700';
+    if (s > 1.0) return 'bg-white';
+    if (s >= 0.33) return 'bg-emerald-500';
+    if (s >= 0.125) return 'bg-amber-500';
+    return 'bg-red-500';
+  }
+
+  // Hardware switch
+  function updateHw(hw: string) {
+    tbody.querySelectorAll('[data-sol-raw-hw]').forEach(row => {
+      const el = row as HTMLElement;
+      const solRawMap = JSON.parse(el.dataset.solRawHw || '{}');
+      const sMap = JSON.parse(el.dataset.sHw || '{}');
+      const solRaw: number | null = solRawMap[hw] ?? null;
+      const sVal: number | null = sMap[hw] ?? null;
+      const isOperator = el.classList.contains('sv-operator-row');
+      const ms = solRaw != null && solRaw >= 1000;
+
+      const solCell = el.querySelector('.sv-sol-cell');
+      if (solCell) solCell.textContent = fmtAs(solRaw, ms);
+
+      const prodCell = el.querySelector('.sv-prod-cell');
+      if (prodCell) {
+        const prodRaw = isOperator
+          ? parseFloat(el.dataset.prod || '0') || null
+          : parseFloat(el.dataset.prodRaw || '') || null;
+        prodCell.textContent = fmtAs(prodRaw, ms);
+      }
+
+      if (isOperator) {
+        el.dataset.sol = String(solRaw ?? 0);
+        el.dataset.s = String(sVal ?? 0);
+        const badgeCell = el.querySelector('.sv-s-badge-cell');
+        if (badgeCell) {
+          badgeCell.innerHTML = `<span class="badge text-xs ${sColorClass(sVal, true)}">${fmtS(sVal)}</span>`;
+        }
+      } else {
+        const textCell = el.querySelector('.sv-s-text-cell');
+        if (textCell) {
+          textCell.innerHTML = `<span class="font-mono text-xs ${sColorClass(sVal, false)}">${fmtS(sVal)}</span>`;
+        }
+      }
+
+      const barCell = el.querySelector('.sv-bar-cell');
+      if (barCell) {
+        const w = sVal != null && sVal > 0 ? Math.min(sVal * 100, 100) : 0;
+        const bCls = barColorClass(sVal);
+        const opacity = isOperator ? '1' : '0.7';
+        barCell.innerHTML = `<div class="w-20 h-1.5 bg-gray-800 rounded-full overflow-hidden"><div class="h-full rounded-full ${bCls}" style="width: ${w}%; opacity: ${opacity}"></div></div>`;
+      }
+    });
+  }
+
+  hwSelect.addEventListener('change', () => {
+    if (hwSelect.value) updateHw(hwSelect.value);
+  });
+
+  // Sort
+  let currentSort = { key: '', asc: true };
+
+  document.getElementById('shape-view-table')!.querySelectorAll('[data-sv-sort]').forEach(th => {
+    th.addEventListener('click', () => {
+      const key = (th as HTMLElement).dataset.svSort!;
+      if (currentSort.key === key) currentSort.asc = !currentSort.asc;
+      else currentSort = { key, asc: true };
+
+      const opRows = Array.from(tbody.querySelectorAll('.sv-operator-row')) as HTMLElement[];
+
+      opRows.sort((a, b) => {
+        let va: any, vb: any;
+        if (key === 'name') {
+          va = a.dataset.op || '';
+          vb = b.dataset.op || '';
+        } else if (key === 'shapes') {
+          va = parseInt(a.dataset.shapes || '0');
+          vb = parseInt(b.dataset.shapes || '0');
+        } else if (key === 'sol') {
+          va = parseFloat(a.dataset.sol || '0');
+          vb = parseFloat(b.dataset.sol || '0');
+        } else if (key === 'prod') {
+          va = parseFloat(a.dataset.prod || '0');
+          vb = parseFloat(b.dataset.prod || '0');
+        } else if (key === 's') {
+          va = parseFloat(a.dataset.s || '0');
+          vb = parseFloat(b.dataset.s || '0');
+        }
+        if (va < vb) return currentSort.asc ? -1 : 1;
+        if (va > vb) return currentSort.asc ? 1 : -1;
+        return 0;
+      });
+
+      opRows.forEach(opRow => {
+        tbody.appendChild(opRow);
+        const opName = opRow.dataset.op!;
+        tbody.querySelectorAll(`.sv-shape-row[data-parent="${opName}"]`).forEach(sr => {
+          tbody.appendChild(sr);
+        });
+      });
+    });
+  });
+</script>
