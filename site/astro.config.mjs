@@ -2,7 +2,8 @@ import { defineConfig } from 'astro/config';
 import tailwind from '@astrojs/tailwind';
 
 export default defineConfig({
-  site: 'https://atrex-bench.github.io',
+  site: 'https://alibaba.github.io',
+  base: '/atrex-bench',
   integrations: [tailwind()],
   output: 'static',
 });
