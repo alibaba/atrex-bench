@@ -7,18 +7,16 @@ const hwShort: Record<string, string> = {
   'H20': 'H20',
 };
 
-// Available prod hardware (extensible)
 const prodHardware = ['XPU-A', 'H20'];
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 ---
 
 <div class="page-section">
   <div class="page-container">
 
-    <!-- ── Hardware specs ── -->
-    <h2 class="section-heading !mt-0">
-      <span >Hardware Platforms</span>
-      
-    </h2>
+    <!-- Hardware specs -->
+    <h2 class="section-heading !mt-0">Hardware Platforms</h2>
     <div class="grid sm:grid-cols-3 gap-4 mb-12">
       {hardware.map((hw: string) => {
         const spec = (hardware_specs as any)[hw];
@@ -52,14 +50,12 @@ const prodHardware = ['XPU-A', 'H20'];
       })}
     </div>
 
-    <!-- ── Per-operator roofline table ── -->
-    <h2 class="section-heading">
-      <span >Roofline by Operator &times; Hardware</span>
-      
-    </h2>
-    <p lang="en" class="text-gray-400 text-sm mb-2">
+    <!-- Per-operator roofline table -->
+    <h2 class="section-heading">Roofline by Operator &times; Hardware</h2>
+    <p class="text-gray-400 text-sm mb-2">
       T<sub>SOL</sub> is the theoretical Speed-of-Light lower bound: max(W/P<sub>peak</sub>, Q/B<sub>peak</sub>). T<sub>Prod</sub> is the median measured time of the deployed kernel on the selected hardware. All times shown for the median shape of each operator.
     </p>
+
     <div class="flex items-center justify-end mb-3 gap-2">
       <span class="text-xs text-gray-500">T<sub>Prod</sub> hardware:</span>
       <select id="prod-hw-select" class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:border-brand-600 focus:outline-none">
@@ -77,20 +73,25 @@ const prodHardware = ['XPU-A', 'H20'];
         <table class="w-full text-xs" id="roofline-table">
           <thead>
             <tr class="border-b border-gray-800 bg-gray-900/50">
-              <th class="text-left py-2.5 px-3 text-gray-400 font-medium sticky left-0 bg-gray-900/95 z-10">
-                Operator
+              <th class="text-left py-2.5 px-3 text-gray-400 font-medium sticky left-0 bg-gray-900/95 z-10 cursor-pointer hover:text-white select-none" data-rf-sort="id">
+                ID <span class="sort-arrow text-gray-600 ml-1">&#x25B4;&#x25BE;</span>
               </th>
-              <th class="text-center py-2.5 px-3 text-gray-400 font-medium">
-                Regime
+              <th class="text-left py-2.5 px-3 text-gray-400 font-medium cursor-pointer hover:text-white select-none" data-rf-sort="name">
+                Operator <span class="sort-arrow text-gray-600 ml-1">&#x25B4;&#x25BE;</span>
               </th>
-              <th class="text-right py-2.5 px-3 text-gray-400 font-medium">AI</th>
-              {hardware.map((hw: string) => (
-                <th class="text-right py-2.5 px-3 text-gray-400 font-medium whitespace-nowrap">
-                  T<sub>SOL</sub>({hwShort[hw] || hw})
+              <th class="text-center py-2.5 px-3 text-gray-400 font-medium cursor-pointer hover:text-white select-none" data-rf-sort="regime">
+                Regime <span class="sort-arrow text-gray-600 ml-1">&#x25B4;&#x25BE;</span>
+              </th>
+              <th class="text-right py-2.5 px-3 text-gray-400 font-medium cursor-pointer hover:text-white select-none" data-rf-sort="ai">
+                AI <span class="sort-arrow text-gray-600 ml-1">&#x25B4;&#x25BE;</span>
+              </th>
+              {hardware.map((hw: string, i: number) => (
+                <th class="text-right py-2.5 px-3 text-gray-400 font-medium whitespace-nowrap cursor-pointer hover:text-white select-none" data-rf-sort={`sol-${i}`}>
+                  T<sub>SOL</sub>({hwShort[hw] || hw}) <span class="sort-arrow text-gray-600 ml-1">&#x25B4;&#x25BE;</span>
                 </th>
               ))}
-              <th class="text-right py-2.5 px-3 text-gray-400 font-medium whitespace-nowrap">
-                T<sub>Prod</sub>
+              <th class="text-right py-2.5 px-3 text-gray-400 font-medium whitespace-nowrap cursor-pointer hover:text-white select-none" data-rf-sort="tprod">
+                T<sub>Prod</sub> <span class="sort-arrow text-gray-600 ml-1">&#x25B4;&#x25BE;</span>
               </th>
             </tr>
           </thead>
@@ -106,17 +107,19 @@ const prodHardware = ['XPU-A', 'H20'];
                 ? 'text-red-300' : regime === 'memory-bound'
                 ? 'text-blue-300' : 'text-gray-500';
 
-              // Production time is per-SKU; build a map so the dropdown can switch
-              // it, and SKUs without a measurement (e.g. H20) render as "—".
               const prodByHw = Object.fromEntries(
                 prodHardware.map((hw) => [hw, op.production_shapes?.[hw]?.[midSid] ?? null])
               );
               const prodTime = prodByHw[prodHardware[0]];
 
               return (
-                <tr class="border-b border-gray-800/30 hover:bg-gray-800/20">
-                  <td class="py-2 px-3 sticky left-0 bg-gray-950 z-10">
-                    <code class="text-white font-mono">{op.name}</code>
+                <tr class="border-b border-gray-800/30 hover:bg-gray-800/30 transition-colors"
+                    data-rf-id={op.id} data-rf-name={op.name} data-rf-regime={regime} data-rf-ai={rs.ai} data-rf-prod={prodTime ?? ''}
+                    data-rf-sols={JSON.stringify((hardware as string[]).map((hw: string) => rs.SOL_time_ms?.[hw] ?? null))}
+                    data-prod-hw={JSON.stringify(prodByHw)}>
+                  <td class="py-2 px-3 sticky left-0 bg-gray-900/95 z-10 text-gray-500 font-mono">{op.id.replace('atrex_', '')}</td>
+                  <td class="py-2 px-3">
+                    <a href={`${base}/operator/${op.id}`} class="hover:underline"><code class="text-white font-mono">{op.name}</code></a>
                   </td>
                   <td class={`py-2 px-3 text-center ${regimeClass}`}>
                     {regime === 'compute-bound' ? 'C' : regime === 'memory-bound' ? 'M' : 'I'}
@@ -136,8 +139,7 @@ const prodHardware = ['XPU-A', 'H20'];
                       </td>
                     );
                   })}
-                  <td class="py-2 px-3 text-right font-mono prod-time-cell"
-                      data-prod-hw={JSON.stringify(prodByHw)}>
+                  <td class="py-2 px-3 text-right font-mono prod-time-cell">
                     {prodTime != null ? (
                       <span class="text-brand-300">
                         {prodTime >= 1000
@@ -154,15 +156,79 @@ const prodHardware = ['XPU-A', 'H20'];
       </div>
     </div>
 
-    <p lang="en" class="text-gray-500 text-xs mt-3">
+    <p class="text-gray-500 text-xs mt-3">
       C = compute-bound (AI &gt; 10 FLOP/byte), M = memory-bound, I = indexing/structural. T<sub>SOL</sub> = Speed-of-Light theoretical minimum. T<sub>Prod</sub> = deployed kernel median time on selected hardware.
     </p>
-    </div>
+
+  </div>
 </div>
 
 <script>
-  // Switch the T_Prod column when the hardware dropdown changes. Production time
-  // is per-SKU; a SKU with no measurement (e.g. H20) renders as "—".
+  const rfTable = document.getElementById('roofline-table');
+  if (rfTable) {
+    const rfTbody = rfTable.querySelector('tbody')!;
+    const rfSortableThs = rfTable.querySelectorAll('[data-rf-sort]');
+    let rfSort = { key: '', asc: true };
+
+    function updateRfArrows() {
+      rfSortableThs.forEach(th => {
+        const arrow = th.querySelector('.sort-arrow');
+        if (!arrow) return;
+        const key = (th as HTMLElement).dataset.rfSort!;
+        if (key === rfSort.key) {
+          arrow.innerHTML = rfSort.asc ? '&#x25B4;' : '&#x25BE;';
+          arrow.classList.remove('text-gray-600');
+          arrow.classList.add('text-white');
+        } else {
+          arrow.innerHTML = '&#x25B4;&#x25BE;';
+          arrow.classList.remove('text-white');
+          arrow.classList.add('text-gray-600');
+        }
+      });
+    }
+
+    rfSortableThs.forEach(th => {
+      th.addEventListener('click', () => {
+        const key = (th as HTMLElement).dataset.rfSort!;
+        if (rfSort.key === key) rfSort.asc = !rfSort.asc;
+        else rfSort = { key, asc: true };
+        updateRfArrows();
+
+        const rows = Array.from(rfTbody.querySelectorAll('tr')) as HTMLElement[];
+        rows.sort((a, b) => {
+          let va: any, vb: any;
+          if (key === 'id') {
+            va = a.dataset.rfId || ''; vb = b.dataset.rfId || '';
+          } else if (key === 'name') {
+            va = a.dataset.rfName || ''; vb = b.dataset.rfName || '';
+          } else if (key === 'regime') {
+            va = a.dataset.rfRegime || ''; vb = b.dataset.rfRegime || '';
+          } else if (key === 'ai') {
+            va = parseFloat(a.dataset.rfAi || '0'); vb = parseFloat(b.dataset.rfAi || '0');
+          } else if (key === 'tprod') {
+            va = parseFloat(a.dataset.rfProd || '-1'); vb = parseFloat(b.dataset.rfProd || '-1');
+          } else if (key.startsWith('sol-')) {
+            const idx = parseInt(key.split('-')[1]);
+            const getSol = (el: HTMLElement) => {
+              const sols = JSON.parse(el.dataset.rfSols || '[]');
+              return sols[idx] ?? -1;
+            };
+            va = getSol(a); vb = getSol(b);
+          }
+          if (va < vb) return rfSort.asc ? -1 : 1;
+          if (va > vb) return rfSort.asc ? 1 : -1;
+          return 0;
+        });
+        rows.forEach(r => rfTbody.appendChild(r));
+      });
+    });
+
+    // Default sort by ID
+    const idTh = rfTable.querySelector('[data-rf-sort="id"]') as HTMLElement;
+    if (idTh) idTh.click();
+  }
+
+  // T_Prod hardware switch
   const prodHwSelect = document.getElementById('prod-hw-select') as HTMLSelectElement | null;
 
   function fmtProd(us: number | null): string {
