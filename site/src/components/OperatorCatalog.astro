@@ -6,6 +6,8 @@ const dtypes = [...new Set(operators.map((o: any) => o.dtype))].sort();
 const frameworks = [...new Set(operators.map((o: any) => o.framework))].sort();
 const phases = [...new Set(operators.map((o: any) => o.phase))].sort();
 
+const prodSku = 'XPU-A';
+
 function regimeBadge(regime: string) {
   if (regime === 'compute-bound') return 'bg-red-900/40 text-red-300 border-red-800';
   if (regime === 'memory-bound') return 'bg-blue-900/40 text-blue-300 border-blue-800';
@@ -16,6 +18,8 @@ function regimeLabel(regime: string) {
   if (regime === 'memory-bound') return 'memory';
   return 'index';
 }
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 ---
 
 <div class="page-section">
@@ -38,29 +42,32 @@ function regimeLabel(regime: string) {
 
     <div class="card overflow-hidden p-0">
       <div class="overflow-x-auto">
-        <table class="w-full text-sm" id="operator-table">
+        <table class="w-full text-xs" id="operator-table">
           <thead>
             <tr class="border-b border-gray-800 bg-gray-900/50">
-              <th class="text-left py-3 px-3 text-gray-400 font-medium cursor-pointer hover:text-white select-none" data-sort="name">
-                <span data-i18n="operators.table.name">Operator</span> <span class="sort-arrow text-gray-600">&#x25B4;&#x25BE;</span>
+              <th class="text-left py-2.5 px-3 text-gray-400 font-medium cursor-pointer hover:text-white select-none" data-sort="id">
+                ID <span class="sort-arrow text-gray-600 ml-1">&#x25B4;&#x25BE;</span>
               </th>
-              <th class="text-left py-3 px-3 text-gray-400 font-medium cursor-pointer hover:text-white select-none" data-sort="dtype">
-                <span data-i18n="operators.table.dtype">dtype</span>
+              <th class="text-left py-2.5 px-3 text-gray-400 font-medium cursor-pointer hover:text-white select-none" data-sort="name">
+                Operator <span class="sort-arrow text-gray-600 ml-1">&#x25B4;&#x25BE;</span>
               </th>
-              <th class="text-left py-3 px-3 text-gray-400 font-medium hidden md:table-cell">
-                Regime
+              <th class="text-left py-2.5 px-3 text-gray-400 font-medium cursor-pointer hover:text-white select-none" data-sort="dtype">
+                dtype <span class="sort-arrow text-gray-600 ml-1">&#x25B4;&#x25BE;</span>
               </th>
-              <th class="text-left py-3 px-3 text-gray-400 font-medium cursor-pointer hover:text-white select-none hidden sm:table-cell" data-sort="framework">
-                <span data-i18n="operators.table.framework">Framework</span>
+              <th class="text-left py-2.5 px-3 text-gray-400 font-medium hidden md:table-cell cursor-pointer hover:text-white select-none" data-sort="regime">
+                Regime <span class="sort-arrow text-gray-600 ml-1">&#x25B4;&#x25BE;</span>
               </th>
-              <th class="text-right py-3 px-3 text-gray-400 font-medium cursor-pointer hover:text-white select-none" data-sort="shapes">
-                <span data-i18n="operators.table.shapes">Shapes</span>
+              <th class="text-left py-2.5 px-3 text-gray-400 font-medium cursor-pointer hover:text-white select-none hidden sm:table-cell" data-sort="framework">
+                Framework <span class="sort-arrow text-gray-600 ml-1">&#x25B4;&#x25BE;</span>
               </th>
-              <th class="text-right py-3 px-3 text-gray-400 font-medium hidden lg:table-cell">
-                T<sub>Prod</sub> <span class="text-gray-600 font-normal">(XPU-A)</span>
+              <th class="text-right py-2.5 px-3 text-gray-400 font-medium cursor-pointer hover:text-white select-none" data-sort="shapes">
+                Shapes <span class="sort-arrow text-gray-600 ml-1">&#x25B4;&#x25BE;</span>
               </th>
-              <th class="text-right py-3 px-3 text-gray-400 font-medium cursor-pointer hover:text-white select-none" data-sort="importance">
-                <span data-i18n="operators.table.importance">Importance</span>
+              <th class="text-right py-2.5 px-3 text-gray-400 font-medium hidden lg:table-cell cursor-pointer hover:text-white select-none" data-sort="tprod">
+                T<sub>Prod</sub> <span class="sort-arrow text-gray-600 ml-1">&#x25B4;&#x25BE;</span>
+              </th>
+              <th class="text-right py-2.5 px-3 text-gray-400 font-medium cursor-pointer hover:text-white select-none" data-sort="importance">
+                Importance <span class="sort-arrow text-gray-600 ml-1">&#x25B4;&#x25BE;</span>
               </th>
             </tr>
           </thead>
@@ -68,11 +75,11 @@ function regimeLabel(regime: string) {
             {operators.map((op: any) => (
               <tr class="border-b border-gray-800/30 hover:bg-gray-800/30 transition-colors"
                   data-dtype={op.dtype} data-phase={op.phase} data-framework={op.framework}>
-                <td class="py-2.5 px-3">
-                  <code class="text-white font-mono text-xs">{op.name}</code>
-                  <div class="text-gray-600 text-xs mt-0.5 font-mono">{op.id}</div>
+                <td class="py-2 px-3 text-gray-500 font-mono">{op.id.replace('atrex_', '')}</td>
+                <td class="py-2 px-3">
+                  <a href={`${base}/operator/${op.id}`} class="hover:underline"><code class="text-white font-mono">{op.name}</code></a>
                 </td>
-                <td class="py-2.5 px-3">
+                <td class="py-2 px-3">
                   <span class={`badge ${
                     op.dtype === 'bf16' ? 'badge-bf16' :
                     op.dtype === 'fp16' ? 'badge-fp16' :
@@ -81,30 +88,30 @@ function regimeLabel(regime: string) {
                     'badge-int32'
                   }`}>{op.dtype}</span>
                 </td>
-                <td class="py-2.5 px-3 hidden md:table-cell">
+                <td class="py-2 px-3 hidden md:table-cell">
                   {op.roofline ? (
                     <span class={`badge text-xs ${regimeBadge(op.roofline.regime)}`}>
                       {regimeLabel(op.roofline.regime)}
                     </span>
                   ) : <span class="text-gray-600">—</span>}
                 </td>
-                <td class="py-2.5 px-3 text-gray-400 text-xs hidden sm:table-cell">{op.framework}</td>
-                <td class="py-2.5 px-3 text-right text-gray-300">{op.shapes}</td>
-                <td class="py-2.5 px-3 text-right hidden lg:table-cell">
-                  {op.production_perf?.['XPU-A'] ? (
-                    <span class="text-gray-300 font-mono text-xs">
-                      {op.production_perf['XPU-A'].median_us >= 1000
-                        ? (op.production_perf['XPU-A'].median_us / 1000).toFixed(1) + ' ms'
-                        : op.production_perf['XPU-A'].median_us.toFixed(0) + ' us'}
+                <td class="py-2 px-3 text-gray-400 hidden sm:table-cell">{op.framework}</td>
+                <td class="py-2 px-3 text-right text-gray-300">{op.shapes}</td>
+                <td class="py-2 px-3 text-right hidden lg:table-cell">
+                  {op.production_perf?.[prodSku] ? (
+                    <span class="text-gray-300 font-mono">
+                      {op.production_perf[prodSku].median_us >= 1000
+                        ? (op.production_perf[prodSku].median_us / 1000).toFixed(1) + ' ms'
+                        : op.production_perf[prodSku].median_us.toFixed(0) + ' us'}
                     </span>
                   ) : <span class="text-gray-600">—</span>}
                 </td>
-                <td class="py-2.5 px-3 text-right">
+                <td class="py-2 px-3 text-right">
                   <div class="flex items-center justify-end gap-2">
                     <div class="w-16 h-1.5 bg-gray-800 rounded-full overflow-hidden hidden sm:block">
                       <div class="h-full bg-brand-500 rounded-full" style={`width: ${Math.min(op.importance / 0.4 * 100, 100)}%`}></div>
                     </div>
-                    <span class="text-gray-300 font-mono text-xs w-14 text-right">{(op.importance * 100).toFixed(1)}%</span>
+                    <span class="text-gray-300 font-mono w-14 text-right">{(op.importance * 100).toFixed(1)}%</span>
                   </div>
                 </td>
               </tr>
@@ -142,14 +149,34 @@ function regimeLabel(regime: string) {
   [filterDtype, filterPhase, filterFramework].forEach(el => el.addEventListener('change', applyFilters));
 
   let currentSort = { key: '', asc: true };
-  document.querySelectorAll('[data-sort]').forEach(th => {
+  const sortableThs = document.querySelectorAll('#operator-table [data-sort]');
+
+  function updateSortArrows() {
+    sortableThs.forEach(th => {
+      const arrow = th.querySelector('.sort-arrow');
+      if (!arrow) return;
+      const key = (th as HTMLElement).dataset.sort!;
+      if (key === currentSort.key) {
+        arrow.innerHTML = currentSort.asc ? '&#x25B4;' : '&#x25BE;';
+        arrow.classList.remove('text-gray-600');
+        arrow.classList.add('text-white');
+      } else {
+        arrow.innerHTML = '&#x25B4;&#x25BE;';
+        arrow.classList.remove('text-white');
+        arrow.classList.add('text-gray-600');
+      }
+    });
+  }
+
+  sortableThs.forEach(th => {
     th.addEventListener('click', () => {
       const key = (th as HTMLElement).dataset.sort!;
       if (currentSort.key === key) currentSort.asc = !currentSort.asc;
       else currentSort = { key, asc: true };
+      updateSortArrows();
       const rows = Array.from(tbody.querySelectorAll('tr'));
       rows.sort((a, b) => {
-        const colMap: Record<string, number> = { name: 0, dtype: 1, framework: 3, shapes: 4, importance: 6 };
+        const colMap: Record<string, number> = { id: 0, name: 1, dtype: 2, regime: 3, framework: 4, shapes: 5, tprod: 6, importance: 7 };
         const colIdx = colMap[key] ?? 0;
         const cellA = a.querySelectorAll('td')[colIdx];
         const cellB = b.querySelectorAll('td')[colIdx];
@@ -158,6 +185,14 @@ function regimeLabel(regime: string) {
         let vb: any = cellB.textContent?.trim() || '';
         if (key === 'shapes') { va = parseInt(va); vb = parseInt(vb); }
         else if (key === 'importance') { va = parseFloat(va); vb = parseFloat(vb); }
+        else if (key === 'tprod') {
+          const parseTime = (s: string) => {
+            if (s === '—') return -1;
+            if (s.endsWith('ms')) return parseFloat(s) * 1000;
+            return parseFloat(s);
+          };
+          va = parseTime(va); vb = parseTime(vb);
+        }
         if (va < vb) return currentSort.asc ? -1 : 1;
         if (va > vb) return currentSort.asc ? 1 : -1;
         return 0;
@@ -165,4 +200,8 @@ function regimeLabel(regime: string) {
       rows.forEach(r => tbody.appendChild(r));
     });
   });
+
+  // Default sort by ID
+  const idTh = document.querySelector('#operator-table [data-sort="id"]') as HTMLElement;
+  if (idTh) idTh.click();
 </script>
