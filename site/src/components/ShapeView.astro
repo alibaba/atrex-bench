@@ -1,13 +1,11 @@
 ---
 import operatorData from '../data/operators.json';
-const { operators, hardware } = operatorData;
+import { siteConfig } from '../config';
+const { operators, hardware, hardware_specs } = operatorData;
+const hwSpecs = hardware_specs as Record<string, Record<string, any>>;
 
-const hwShort: Record<string, string> = {
-  'XPU-A': 'XPU-A',
-  'H20': 'H20',
-};
-
-const prodHardware = ['XPU-A', 'H20'];
+const hwShort = siteConfig.hwShort;
+const prodHardware = siteConfig.prodHardware;
 
 type PerHw = Record<string, number | null>;
 
@@ -20,6 +18,7 @@ type ShapeEntry = {
 };
 
 type OpRow = {
+  id: string;
   name: string;
   dtype: string;
   phase: string;
@@ -40,7 +39,7 @@ const median = (arr: number[]) => {
 
 for (const op of operators as any[]) {
   const rs = op.roofline_shapes || {};
-  const ps = op.production_shapes || {};   // { sku: { sid: us } }
+  const ps = op.production_shapes || {};
   const shapeIds = Object.keys(rs).sort((a, b) => parseInt(a) - parseInt(b));
   if (shapeIds.length === 0) continue;
 
@@ -66,12 +65,10 @@ for (const op of operators as any[]) {
       sol[hw] = v;
       if (v != null) solsByHw[hw].push(v);
 
-      // Production time is per-SKU; a SKU with no measurement stays null (→ "—").
       const pv = ps[hw]?.[sid] ?? null;
       prod[hw] = pv;
       if (pv != null) prodsByHw[hw].push(pv);
 
-      // S is only meaningful when the same SKU has both a roofline and a measurement.
       const ratio = v != null && pv != null && pv > 0 ? v / pv : null;
       s[hw] = ratio;
       if (ratio != null) sByHw[hw].push(ratio);
@@ -90,7 +87,7 @@ for (const op of operators as any[]) {
   }
 
   rows.push({
-    name: op.name, dtype: op.dtype, phase: op.phase || '',
+    id: op.id, name: op.name, dtype: op.dtype, phase: op.phase || '',
     shapeCount: shapes.length, medianSol, medianProd, medianS, shapes,
   });
 }
@@ -102,13 +99,20 @@ function useMsUnit(sol_us: number | null): boolean {
   return sol_us != null && sol_us >= 1000;
 }
 
-function fmtAs(us: number | null, ms: boolean): string {
+function fmtAs(us: number | null, ms: boolean, hw?: string): string {
   if (us == null) return '—';
+  if (hw) {
+    const floor = hwSpecs[hw]?.launch_overhead_us;
+    if (floor != null && us <= floor + 0.01) {
+      return '< ' + floor.toFixed(1) + ' us';
+    }
+  }
   return ms ? (us / 1000).toFixed(1) + ' ms' : us.toFixed(1) + ' us';
 }
 
 function fmtS(s: number | null): string {
   if (s == null) return '—';
+  if (s > 1.0) return (s * 100).toFixed(1) + '% ⚠';
   return (s * 100).toFixed(1) + '%';
 }
 
@@ -140,17 +144,17 @@ function barW(s: number | null): number {
   if (s == null || s <= 0) return 0;
   return Math.min(s * 100, 100);
 }
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 ---
 
-<div class="page-section">
+<div class="page-section" data-hw-specs={JSON.stringify(hwSpecs)}>
   <div class="page-container">
-    <h2 class="section-heading !mt-0">
-      <span >SOL Ratio by Operator &times; Shape</span>
-      
-    </h2>
-    <p lang="en" class="text-gray-400 text-sm mb-2">
+    <h2 class="section-heading !mt-0">SOL Ratio by Operator &times; Shape</h2>
+    <p class="text-gray-400 text-sm mb-2">
       Click an operator to expand per-shape details. S = T<sub>SOL</sub> / T<sub>Prod</sub> — higher is better (100% = hardware limit).
     </p>
+
     <div class="flex items-center justify-end mb-3 gap-2">
       <span class="text-xs text-gray-500">Hardware:</span>
       <select id="sv-hw-select" class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:border-brand-600 focus:outline-none">
@@ -169,24 +173,29 @@ function barW(s: number | null): number {
           <thead>
             <tr class="border-b border-gray-800 bg-gray-900/50">
               <th class="text-left py-2.5 px-3 text-gray-400 font-medium w-5"></th>
+              <th class="text-left py-2.5 px-3 text-gray-400 font-medium cursor-pointer hover:text-white select-none whitespace-nowrap" data-sv-sort="id">
+                ID <span class="sort-arrow text-gray-600 ml-1">&#x25B4;&#x25BE;</span>
+              </th>
               <th class="text-left py-2.5 px-3 text-gray-400 font-medium cursor-pointer hover:text-white select-none" data-sv-sort="name">
-                Operator
+                Operator <span class="sort-arrow text-gray-600 ml-1">&#x25B4;&#x25BE;</span>
               </th>
-              <th class="text-left py-2.5 px-3 text-gray-400 font-medium hidden sm:table-cell">dtype</th>
-              <th class="text-left py-2.5 px-3 text-gray-400 font-medium hidden md:table-cell">
-                Phase
+              <th class="text-left py-2.5 px-3 text-gray-400 font-medium hidden sm:table-cell cursor-pointer hover:text-white select-none" data-sv-sort="dtype">
+                dtype <span class="sort-arrow text-gray-600 ml-1">&#x25B4;&#x25BE;</span>
               </th>
-              <th class="text-right py-2.5 px-3 text-gray-400 font-medium cursor-pointer hover:text-white select-none" data-sv-sort="shapes">
-                Shapes
+              <th class="text-left py-2.5 px-3 text-gray-400 font-medium hidden md:table-cell cursor-pointer hover:text-white select-none" data-sv-sort="phase">
+                Phase <span class="sort-arrow text-gray-600 ml-1">&#x25B4;&#x25BE;</span>
               </th>
-              <th class="text-right py-2.5 px-3 text-gray-400 font-medium hidden lg:table-cell cursor-pointer hover:text-white select-none" data-sv-sort="sol">
-                T<sub>SOL</sub> (median)
+              <th class="text-right py-2.5 px-3 text-gray-400 font-medium cursor-pointer hover:text-white select-none whitespace-nowrap" data-sv-sort="shapes">
+                Shapes <span class="sort-arrow text-gray-600 ml-1">&#x25B4;&#x25BE;</span>
               </th>
-              <th class="text-right py-2.5 px-3 text-gray-400 font-medium hidden lg:table-cell cursor-pointer hover:text-white select-none" data-sv-sort="prod">
-                T<sub>Prod</sub> (median)
+              <th class="text-right py-2.5 px-3 text-gray-400 font-medium hidden lg:table-cell cursor-pointer hover:text-white select-none whitespace-nowrap" data-sv-sort="sol">
+                T<sub>SOL</sub> (median) <span class="sort-arrow text-gray-600 ml-1">&#x25B4;&#x25BE;</span>
               </th>
-              <th class="text-right py-2.5 px-3 text-gray-400 font-medium cursor-pointer hover:text-white select-none" data-sv-sort="s">
-                S (median)
+              <th class="text-right py-2.5 px-3 text-gray-400 font-medium hidden lg:table-cell cursor-pointer hover:text-white select-none whitespace-nowrap" data-sv-sort="prod">
+                T<sub>Prod</sub> (median) <span class="sort-arrow text-gray-600 ml-1">&#x25B4;&#x25BE;</span>
+              </th>
+              <th class="text-right py-2.5 px-3 text-gray-400 font-medium cursor-pointer hover:text-white select-none whitespace-nowrap" data-sv-sort="s">
+                S (median) <span class="sort-arrow text-gray-600 ml-1">&#x25B4;&#x25BE;</span>
               </th>
               <th class="py-2.5 px-3 text-gray-400 font-medium hidden sm:table-cell w-24"></th>
             </tr>
@@ -197,7 +206,8 @@ function barW(s: number | null): number {
               return (
               <>
                 <tr class="border-b border-gray-800/30 hover:bg-gray-800/30 transition-colors cursor-pointer sv-operator-row"
-                    data-op={op.name} data-shapes={op.shapeCount}
+                    data-op={op.name} data-op-id={op.id} data-op-dtype={op.dtype} data-op-phase={op.phase || ''}
+                    data-shapes={op.shapeCount}
                     data-sol={op.medianSol[defaultHw] ?? 0}
                     data-prod={op.medianProd[defaultHw] ?? 0}
                     data-s={op.medianS[defaultHw] ?? 0}
@@ -206,8 +216,9 @@ function barW(s: number | null): number {
                     data-s-hw={JSON.stringify(Object.fromEntries((hardware as string[]).map(hw => [hw, op.medianS[hw]])))}
                     >
                   <td class="py-2 px-3 text-gray-500 sv-chevron">&#x25B6;</td>
+                  <td class="py-2 px-3 text-gray-500 font-mono">{op.id.replace('atrex_', '')}</td>
                   <td class="py-2 px-3">
-                    <code class="text-white font-mono">{op.name}</code>
+                    <a href={`${base}/operator/${op.id}`} class="hover:underline"><code class="text-white font-mono">{op.name}</code></a>
                   </td>
                   <td class="py-2 px-3 hidden sm:table-cell">
                     <span class={`badge ${
@@ -217,15 +228,15 @@ function barW(s: number | null): number {
                       op.dtype === 'fp32' ? 'badge-fp32' : 'badge-int32'
                     }`}>{op.dtype}</span>
                   </td>
-                  <td class="py-2 px-3 text-gray-400 hidden md:table-cell">{op.phase || '—'}</td>
+                  <td class="py-2 px-3 text-gray-400 hidden md:table-cell">{op.phase === 'prefill/decode' ? 'both' : (op.phase || '—')}</td>
                   <td class="py-2 px-3 text-right text-gray-300">{op.shapeCount}</td>
-                  <td class="py-2 px-3 text-right font-mono text-gray-300 hidden lg:table-cell sv-sol-cell">
-                    {fmtAs(op.medianSol[defaultHw], opMs)}
+                  <td class="py-2 px-3 text-right font-mono text-gray-300 hidden lg:table-cell sv-sol-cell whitespace-nowrap">
+                    {fmtAs(op.medianSol[defaultHw], opMs, defaultHw)}
                   </td>
-                  <td class="py-2 px-3 text-right font-mono text-gray-300 hidden lg:table-cell sv-prod-cell">
+                  <td class="py-2 px-3 text-right font-mono text-gray-300 hidden lg:table-cell sv-prod-cell whitespace-nowrap">
                     {fmtAs(op.medianProd[defaultHw], opMs)}
                   </td>
-                  <td class="py-2 px-3 text-right sv-s-badge-cell">
+                  <td class="py-2 px-3 text-right sv-s-badge-cell whitespace-nowrap">
                     <span class={`badge text-xs ${sBadgeCls(op.medianS[defaultHw])}`}>
                       {fmtS(op.medianS[defaultHw])}
                     </span>
@@ -248,19 +259,20 @@ function barW(s: number | null): number {
                       data-s-hw={JSON.stringify(Object.fromEntries((hardware as string[]).map(hw => [hw, sh.s[hw]])))}
                       >
                     <td class="py-1.5 px-3"></td>
+                    <td class="py-1.5 px-3"></td>
                     <td class="py-1.5 px-3" colspan="4">
                       <div class="pl-4 border-l-2 border-gray-800">
                         <span class="text-gray-400 font-mono text-xs">#{sh.id}</span>
                         <span class="text-gray-500 ml-2 text-xs">{sh.description}</span>
                       </div>
                     </td>
-                    <td class="py-1.5 px-3 text-right font-mono text-gray-400 hidden lg:table-cell sv-sol-cell">
-                      {fmtAs(sh.sol[defaultHw], shMs)}
+                    <td class="py-1.5 px-3 text-right font-mono text-gray-400 hidden lg:table-cell sv-sol-cell whitespace-nowrap">
+                      {fmtAs(sh.sol[defaultHw], shMs, defaultHw)}
                     </td>
-                    <td class="py-1.5 px-3 text-right font-mono text-brand-300 hidden lg:table-cell sv-prod-cell">
+                    <td class="py-1.5 px-3 text-right font-mono text-brand-300 hidden lg:table-cell sv-prod-cell whitespace-nowrap">
                       {fmtAs(sh.prod[defaultHw], shMs)}
                     </td>
-                    <td class="py-1.5 px-3 text-right sv-s-text-cell">
+                    <td class="py-1.5 px-3 text-right sv-s-text-cell whitespace-nowrap">
                       <span class={`font-mono text-xs ${sTextCls(sh.s[defaultHw])}`}>
                         {fmtS(sh.s[defaultHw])}
                       </span>
@@ -299,10 +311,7 @@ function barW(s: number | null): number {
         <span class="inline-block w-2.5 h-2.5 rounded-full bg-red-500"></span>
         <span>&lt; 12%</span>
       </div>
-      <span class="ml-auto">
-        <span >S = T<sub>SOL</sub> / T<sub>Prod</sub>. Higher = closer to hardware limit.</span>
-        
-      </span>
+      <span class="ml-auto">S = T<sub>SOL</sub> / T<sub>Prod</sub>. Higher = closer to hardware limit.</span>
     </div>
   </div>
 </div>
@@ -314,7 +323,7 @@ function barW(s: number | null): number {
   // Expand / collapse
   tbody.querySelectorAll('.sv-operator-row').forEach(row => {
     row.addEventListener('click', (e) => {
-      if ((e.target as HTMLElement).closest('select')) return;
+      if ((e.target as HTMLElement).closest('select, a')) return;
       const opName = (row as HTMLElement).dataset.op!;
       const chevron = row.querySelector('.sv-chevron')!;
       const shapes = tbody.querySelectorAll(`.sv-shape-row[data-parent="${opName}"]`);
@@ -333,13 +342,22 @@ function barW(s: number | null): number {
   });
 
   // Helpers
+  const hwSpecsClient = JSON.parse(document.querySelector('[data-hw-specs]')?.getAttribute('data-hw-specs') || '{}');
+
   function fmtS(s: number | null): string {
     if (s == null) return '—';
+    if (s > 1.0) return (s * 100).toFixed(1) + '% ⚠';
     return (s * 100).toFixed(1) + '%';
   }
 
-  function fmtAs(us: number | null, ms: boolean): string {
+  function fmtAs(us: number | null, ms: boolean, hw?: string): string {
     if (us == null) return '—';
+    if (hw) {
+      const floor = hwSpecsClient[hw]?.launch_overhead_us;
+      if (floor != null && us <= floor + 0.01) {
+        return '< ' + floor.toFixed(1) + ' us';
+      }
+    }
     return ms ? (us / 1000).toFixed(1) + ' ms' : us.toFixed(1) + ' us';
   }
 
@@ -378,7 +396,7 @@ function barW(s: number | null): number {
       const ms = solRaw != null && solRaw >= 1000;
 
       const solCell = el.querySelector('.sv-sol-cell');
-      if (solCell) solCell.textContent = fmtAs(solRaw, ms);
+      if (solCell) solCell.textContent = fmtAs(solRaw, ms, hw);
 
       const prodMap = JSON.parse((isOperator ? el.dataset.prodHw : el.dataset.prodRawHw) || '{}');
       const prodRaw: number | null = prodMap[hw] ?? null;
@@ -416,32 +434,52 @@ function barW(s: number | null): number {
 
   // Sort
   let currentSort = { key: '', asc: true };
+  const svSortableThs = document.getElementById('shape-view-table')!.querySelectorAll('[data-sv-sort]');
 
-  document.getElementById('shape-view-table')!.querySelectorAll('[data-sv-sort]').forEach(th => {
+  function updateSvSortArrows() {
+    svSortableThs.forEach(th => {
+      const arrow = th.querySelector('.sort-arrow');
+      if (!arrow) return;
+      const key = (th as HTMLElement).dataset.svSort!;
+      if (key === currentSort.key) {
+        arrow.innerHTML = currentSort.asc ? '&#x25B4;' : '&#x25BE;';
+        arrow.classList.remove('text-gray-600');
+        arrow.classList.add('text-white');
+      } else {
+        arrow.innerHTML = '&#x25B4;&#x25BE;';
+        arrow.classList.remove('text-white');
+        arrow.classList.add('text-gray-600');
+      }
+    });
+  }
+
+  svSortableThs.forEach(th => {
     th.addEventListener('click', () => {
       const key = (th as HTMLElement).dataset.svSort!;
       if (currentSort.key === key) currentSort.asc = !currentSort.asc;
       else currentSort = { key, asc: true };
+      updateSvSortArrows();
 
       const opRows = Array.from(tbody.querySelectorAll('.sv-operator-row')) as HTMLElement[];
 
       opRows.sort((a, b) => {
         let va: any, vb: any;
-        if (key === 'name') {
-          va = a.dataset.op || '';
-          vb = b.dataset.op || '';
+        if (key === 'id') {
+          va = a.dataset.opId || ''; vb = b.dataset.opId || '';
+        } else if (key === 'name') {
+          va = a.dataset.op || ''; vb = b.dataset.op || '';
+        } else if (key === 'dtype') {
+          va = a.dataset.opDtype || ''; vb = b.dataset.opDtype || '';
+        } else if (key === 'phase') {
+          va = a.dataset.opPhase || ''; vb = b.dataset.opPhase || '';
         } else if (key === 'shapes') {
-          va = parseInt(a.dataset.shapes || '0');
-          vb = parseInt(b.dataset.shapes || '0');
+          va = parseInt(a.dataset.shapes || '0'); vb = parseInt(b.dataset.shapes || '0');
         } else if (key === 'sol') {
-          va = parseFloat(a.dataset.sol || '0');
-          vb = parseFloat(b.dataset.sol || '0');
+          va = parseFloat(a.dataset.sol || '0'); vb = parseFloat(b.dataset.sol || '0');
         } else if (key === 'prod') {
-          va = parseFloat(a.dataset.prod || '0');
-          vb = parseFloat(b.dataset.prod || '0');
+          va = parseFloat(a.dataset.prod || '0'); vb = parseFloat(b.dataset.prod || '0');
         } else if (key === 's') {
-          va = parseFloat(a.dataset.s || '0');
-          vb = parseFloat(b.dataset.s || '0');
+          va = parseFloat(a.dataset.s || '0'); vb = parseFloat(b.dataset.s || '0');
         }
         if (va < vb) return currentSort.asc ? -1 : 1;
         if (va > vb) return currentSort.asc ? 1 : -1;
@@ -457,4 +495,8 @@ function barW(s: number | null): number {
       });
     });
   });
+
+  // Default sort by ID
+  const idTh = document.querySelector('#shape-view-table [data-sv-sort="id"]') as HTMLElement;
+  if (idTh) idTh.click();
 </script>

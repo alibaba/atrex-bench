@@ -1,4 +1,5 @@
 ---
+import { siteConfig } from '../config';
 ---
 
 <div class="page-section">
@@ -18,7 +19,7 @@
     --device=/dev/kfd --device=/dev/dri --group-add video \
     -e ANTHROPIC_API_KEY -e OPENAI_API_KEY \
     -v $PWD:/workspace \
-    {'<YOUR_REGISTRY>'}/atrex-bench:rocm7.2</code></pre>
+    {siteConfig.dockerImage}</code></pre>
       </div>
 
       <div class="card">
@@ -33,7 +34,7 @@
         </p>
         <pre class="code-block"><code>python scripts/run_eval.py \
   --input path/to/candidate.py \
-  --reference-dir data/fused_moe \
+  --reference-dir {siteConfig.dataDir}/fused_moe \
   --output results/run</code></pre>
       </div>
 
