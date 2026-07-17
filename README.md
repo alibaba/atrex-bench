@@ -22,6 +22,10 @@ input generator, a shape spec, and hidden source-aware metadata. The evaluator r
 through three stages — compile → correctness → performance — and reports SOL efficiency against
 a cached roofline.
 
+<p align="center">
+  <img src="assets/atrex-bench-pipeline.png" alt="Atrex-Bench pipeline from production traces to roofline scoring" width="100%">
+</p>
+
 ## Highlights
 
 - **30 operators**, mostly derived from real production traces (vLLM / SGLang / AITER / rtp-llm).
@@ -246,6 +250,22 @@ Most are trace-derived (`status: "trace_reference"`); the rest are curated.
 
 When adding or reshaping operator data, keep `shapes.json` and `roofline.json` aligned and
 refresh `SOL_time_ms` through `scripts/roofline.py`.
+
+## Citation
+
+Please cite our [paper](https://arxiv.org/abs/2607.14541) if it is helpful to your research.
+
+```bibtex
+@misc{atrex2026,
+  title         = {Are LLM-Generated GPU Kernels Production-Ready? A Trace-Driven Benchmark and Optimization Agent},
+  author        = {Lingyun Yang and Yuxiao Wang and Shenghao Liang and Linfeng Yang and Daocheng Ying and Chunbo You and Rui Zhang and Luping Wang and Yinghao Yu and Guodong Yang and Liping Zhang},
+  year          = {2026},
+  eprint        = {2607.14541},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.AI},
+  url           = {https://arxiv.org/abs/2607.14541}
+}
+```
 
 ## License
 
