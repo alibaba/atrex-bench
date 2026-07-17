@@ -1,0 +1,261 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import operatorData from '../../data/operators.json';
+import { createHighlighter } from 'shiki';
+
+const highlighter = await createHighlighter({
+  themes: ['github-dark-dimmed'],
+  langs: ['python'],
+});
+
+function highlight(code: string): string {
+  if (!code.trim()) return '';
+  return highlighter.codeToHtml(code.replace(/\n$/, ''), {
+    lang: 'python',
+    theme: 'github-dark-dimmed',
+  });
+}
+
+export function getStaticPaths() {
+  const { operators } = operatorData as any;
+  return operators.map((op: any) => ({
+    params: { id: op.id },
+    props: { op },
+  }));
+}
+
+const { op } = Astro.props as { op: any };
+const { hardware, hardware_specs } = operatorData as any;
+
+const hwShort: Record<string, string> = {
+  'XPU-A': 'XPU-A',
+  'H20': 'H20',
+};
+
+const defaultHw = 'XPU-A';
+const details = op.shape_details || {};
+const shapeIds = Object.keys(details).sort((a, b) => parseInt(a) - parseInt(b));
+const hwList = hardware as string[];
+const hwLabels = hwList.map((hw: string) => hwShort[hw] || hw);
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+
+function dtypeBadge(dtype: string) {
+  if (dtype === 'bf16') return 'badge-bf16';
+  if (dtype === 'fp16') return 'badge-fp16';
+  if (dtype.startsWith('fp8')) return 'badge-fp8';
+  if (dtype === 'fp32') return 'badge-fp32';
+  return 'badge-int32';
+}
+
+function fmtTime(us: number | null | undefined): string {
+  if (us == null) return '—';
+  return us >= 1000 ? (us / 1000).toFixed(2) + ' ms' : us.toFixed(2) + ' us';
+}
+
+function getProdUs(sid: string): number | null {
+  const prodMap = details[sid]?.prod_us;
+  if (!prodMap || typeof prodMap !== 'object') return null;
+  for (const sku of hwList) {
+    if (prodMap[sku] != null) return prodMap[sku];
+  }
+  return null;
+}
+
+function fmtS(sol: number | null | undefined, prod: number | null | undefined): string {
+  if (sol == null || prod == null || prod === 0) return '—';
+  return ((sol / prod) * 100).toFixed(1) + '%';
+}
+
+function sClass(sol: number | null | undefined, prod: number | null | undefined): string {
+  if (sol == null || prod == null || prod === 0) return 'text-gray-600';
+  const s = sol / prod;
+  if (s >= 1.0) return 'text-white font-semibold';
+  if (s >= 0.33) return 'text-emerald-400';
+  if (s >= 0.125) return 'text-amber-400';
+  return 'text-red-400';
+}
+
+function fmtVal(v: any): string {
+  if (v == null) return '—';
+  if (Array.isArray(v)) {
+    if (v.length === 0) return '[]';
+    const uniq = [...new Set(v)];
+    if (uniq.length === 1) return `[${uniq[0]}] × ${v.length}`;
+    if (v.length > 8) return `[${v.slice(0, 4).join(', ')}, …] (${v.length})`;
+    return `[${v.join(', ')}]`;
+  }
+  return String(v);
+}
+
+const kwargKeys: string[] = [];
+if (shapeIds.length > 0) {
+  const ik = details[shapeIds[0]]?.input_kwargs || {};
+  for (const k of Object.keys(ik)) {
+    kwargKeys.push(k);
+  }
+}
+
+const refHtml = op.reference_code ? highlight(op.reference_code) : '';
+const inputHtml = op.input_code ? highlight(op.input_code) : '';
+const importanceStr = (op.importance * 100).toFixed(1) + '%';
+---
+
+<Layout title={`${op.name} — Atrex-Bench`}>
+  <div class="page-container pt-10 pb-20">
+
+    <!-- Breadcrumb -->
+    <nav class="mb-8">
+      <a href={`${base}/data`} class="text-gray-500 hover:text-white text-sm transition-colors">
+        &larr; Data
+      </a>
+    </nav>
+
+    <!-- Header -->
+    <div class="mb-10">
+      <div class="flex items-baseline gap-3 mb-2">
+        <span class="text-gray-500 font-mono text-sm">#{op.id.replace('atrex_', '')}</span>
+        <h1 class="page-title">{op.name}</h1>
+      </div>
+      <div class="flex flex-wrap items-center gap-2 text-xs mt-3">
+        <span class={`badge ${dtypeBadge(op.dtype)}`}>{op.dtype}</span>
+        <span class="text-gray-600 font-mono">{op.framework}</span>
+        <span class="text-gray-700">&middot;</span>
+        <span class="text-gray-600 font-mono">{op.phase === 'prefill/decode' ? 'both' : (op.phase || '')}</span>
+        <span class="text-gray-700">&middot;</span>
+        <span class="text-gray-600 font-mono">{op.module}</span>
+        <span class="text-gray-700">&middot;</span>
+        <span class="text-gray-500">importance <span class="text-white font-mono">{importanceStr}</span></span>
+      </div>
+    </div>
+
+    <!-- Reference Implementation -->
+    {op.reference_code && (
+      <div class="mb-12">
+        <div class="flex items-baseline justify-between mb-3">
+          <h2 class="section-heading !mt-0 !mb-0">Reference Implementation</h2>
+          <span class="text-gray-600 text-xs font-mono">reference.py</span>
+        </div>
+        <div class="shiki-wrapper" set:html={refHtml} />
+      </div>
+    )}
+
+    <!-- Shapes -->
+    <div class="flex items-baseline justify-between">
+      <h2 class="section-heading">Shapes</h2>
+      <div class="flex items-center gap-2">
+        <span class="text-xs text-gray-500">T<sub>SOL</sub> hardware:</span>
+        <select id="shape-hw-select" class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:border-brand-600 focus:outline-none">
+          {hwList.map((hw: string, i: number) => (
+            <option value={String(i)} selected={hw === defaultHw}>{hwShort[hw] || hw}</option>
+          ))}
+        </select>
+      </div>
+    </div>
+    <div class="card overflow-hidden p-0 mb-12">
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs font-mono" id="shape-table">
+          <thead>
+            <tr class="border-b border-gray-800 bg-gray-900/50">
+              <th class="text-left py-2.5 px-3 text-gray-400 font-medium">#</th>
+              {kwargKeys.map((k) => (
+                <th class="text-right py-2.5 px-3 text-gray-400 font-medium whitespace-nowrap">{k}</th>
+              ))}
+              <th class="text-right py-2.5 px-3 text-gray-400 font-medium whitespace-nowrap" id="sol-col-header"
+                  set:html={`T<sub>SOL</sub>(${hwShort[defaultHw] || defaultHw})`} />
+              <th class="text-right py-2.5 px-3 text-gray-400 font-medium whitespace-nowrap" set:html={"T<sub>Prod</sub>"} />
+              <th class="text-right py-2.5 px-3 text-gray-400 font-medium whitespace-nowrap">S</th>
+            </tr>
+          </thead>
+          <tbody>
+            {shapeIds.map((sid) => {
+              const prodUs = getProdUs(sid);
+              const solUs = details[sid]?.SOL_time_ms?.[defaultHw];
+              return (
+              <tr class="border-b border-gray-800/30 hover:bg-gray-800/20 transition-colors"
+                  data-sols={JSON.stringify(hwList.map((hw: string) => details[sid]?.SOL_time_ms?.[hw] ?? null))}>
+                <td class="py-2 px-3 text-gray-500">{sid}</td>
+                {kwargKeys.map((k) => (
+                  <td class="py-2 px-3 text-right text-gray-300 whitespace-nowrap">{fmtVal(details[sid]?.input_kwargs?.[k])}</td>
+                ))}
+                <td class="py-2 px-3 text-right text-gray-300 whitespace-nowrap sol-cell">{fmtTime(solUs)}</td>
+                <td class={`py-2 px-3 text-right whitespace-nowrap ${prodUs != null ? 'text-brand-300' : 'text-gray-600'}`}>{fmtTime(prodUs)}</td>
+                <td class={`py-2 px-3 text-right whitespace-nowrap ${sClass(solUs, prodUs)}`}>{fmtS(solUs, prodUs)}</td>
+              </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Input Generation -->
+    {op.input_code && (
+      <div class="mb-12">
+        <div class="flex items-baseline justify-between mb-3">
+          <h2 class="section-heading !mt-0 !mb-0">Input Generation</h2>
+          <span class="text-gray-600 text-xs font-mono">input.py</span>
+        </div>
+        <div class="shiki-wrapper" set:html={inputHtml} />
+      </div>
+    )}
+
+  </div>
+</Layout>
+
+<style>
+  .shiki-wrapper {
+    border: 1px solid rgb(48 54 61);
+    border-radius: 0.75rem;
+    overflow: hidden;
+  }
+  .shiki-wrapper :global(pre.shiki) {
+    margin: 0;
+    padding: 1.25rem 1.5rem;
+    overflow-x: auto;
+    font-size: 0.8rem;
+    line-height: 1.7;
+    border-radius: 0;
+  }
+  .shiki-wrapper :global(code) {
+    counter-reset: line;
+  }
+  .shiki-wrapper :global(code .line) {
+    display: inline;
+  }
+  .shiki-wrapper :global(code .line::before) {
+    counter-increment: line;
+    content: counter(line);
+    display: inline-block;
+    width: 2rem;
+    margin-right: 1.5rem;
+    text-align: right;
+    color: rgb(110 118 129);
+    user-select: none;
+    -webkit-user-select: none;
+  }
+</style>
+
+<script define:vars={{ hwLabels }}>
+  const select = document.getElementById('shape-hw-select');
+  const header = document.getElementById('sol-col-header');
+  const rows = document.querySelectorAll('#shape-table tbody tr');
+
+  function fmtUs(us) {
+    if (us == null) return '—';
+    return us >= 1000 ? (us / 1000).toFixed(2) + ' ms' : us.toFixed(2) + ' us';
+  }
+
+  if (select) {
+    select.addEventListener('change', () => {
+      const idx = parseInt(select.value);
+      const label = hwLabels[idx];
+      header.innerHTML = `T<sub>SOL</sub>(${label})`;
+      rows.forEach(row => {
+        const sols = JSON.parse(row.dataset.sols || '[]');
+        const cell = row.querySelector('.sol-cell');
+        if (cell) cell.textContent = fmtUs(sols[idx]);
+      });
+    });
+  }
+</script>

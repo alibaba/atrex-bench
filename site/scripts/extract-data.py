@@ -14,7 +14,7 @@ AI_THRESHOLD = 10.0
 
 def parse_hardware_yaml(path: Path) -> dict:
     text = path.read_text()
-    result = {"name": "", "p_peak": {}, "b_peak_hbm": 0}
+    result = {"name": "", "p_peak": {}, "b_peak_hbm": 0, "launch_overhead_us": None}
     section = ""
     for line in text.splitlines():
         stripped = line.strip()
@@ -22,6 +22,13 @@ def parse_hardware_yaml(path: Path) -> dict:
             continue
         if "name:" in line and "hardware" not in line.lower().split("name")[0]:
             result["name"] = stripped.split("name:")[1].strip().strip('"').strip("'")
+        if stripped.startswith("launch_overhead_s") and ":" in stripped:
+            val = stripped.split(":")[1].strip().split("#")[0].strip()
+            if val and val != "null":
+                try:
+                    result["launch_overhead_us"] = float(val) * 1e6
+                except ValueError:
+                    pass
         if stripped.startswith("p_peak"):
             section = "p_peak"
         elif stripped.startswith("b_peak"):
@@ -51,10 +58,13 @@ def main():
     for yaml_file in sorted(HARDWARE_DIR.glob("*.yaml")):
         hw = parse_hardware_yaml(yaml_file)
         if hw["name"]:
-            hardware_configs[hw["name"]] = {
+            cfg: dict = {
                 "p_peak": hw["p_peak"],
                 "b_peak_hbm": hw["b_peak_hbm"],
             }
+            if hw["launch_overhead_us"] is not None:
+                cfg["launch_overhead_us"] = hw["launch_overhead_us"]
+            hardware_configs[hw["name"]] = cfg
 
     operators = []
     total_shapes = 0
@@ -173,6 +183,34 @@ def main():
             prod_shapes[sku] = shapes_us
         total_prod_perf_shapes += len(measured_sids)
 
+        # Source code for detail pages
+        ref_path = op_dir / "reference.py"
+        inp_path = op_dir / "input.py"
+        reference_code = ref_path.read_text() if ref_path.exists() else ""
+        input_code = inp_path.read_text() if inp_path.exists() else ""
+
+        # Merged per-shape details (kwargs + roofline + prod)
+        shape_details = {}
+        for sid, skw in shapes.items():
+            entry: dict = {}
+            shape_meta = metadata_shapes.get(sid, {})
+            if isinstance(shape_meta, dict):
+                entry["description"] = shape_meta.get("description", "")
+            entry["init_kwargs"] = skw.get("init_kwargs", {})
+            entry["input_kwargs"] = skw.get("input_kwargs", {})
+            rs = roofline_shapes.get(sid)
+            if rs:
+                entry["W_flops"] = rs["W_flops"]
+                entry["Q_bytes"] = rs["Q_bytes"]
+                entry["ai"] = rs["ai"]
+                entry["SOL_time_ms"] = rs["SOL_time_ms"]
+            prod_us_by_sku = {}
+            for sku, sku_shapes in prod_shapes.items():
+                if sid in sku_shapes:
+                    prod_us_by_sku[sku] = sku_shapes[sid]
+            entry["prod_us"] = prod_us_by_sku if prod_us_by_sku else None
+            shape_details[sid] = entry
+
         operators.append({
             "name": op_dir.name,
             "id": metadata.get("id", ""),
@@ -187,6 +225,9 @@ def main():
             "roofline_shapes": roofline_shapes,
             "production_perf": prod_summary,
             "production_shapes": prod_shapes,
+            "reference_code": reference_code,
+            "input_code": input_code,
+            "shape_details": shape_details,
         })
 
     operators.sort(key=lambda x: x["importance"], reverse=True)
@@ -195,11 +236,14 @@ def main():
     hw_summary = {}
     for name, cfg in hardware_configs.items():
         p = cfg["p_peak"]
-        hw_summary[name] = {
+        spec: dict = {
             "bf16_tflops": round(p.get("bf16_tc", 0) / 1e12, 1),
             "fp8_tflops": round(p.get("fp8_e4m3_tc", 0) / 1e12, 1) if p.get("fp8_e4m3_tc") else None,
             "bw_tb_s": round(cfg["b_peak_hbm"] / 1e12, 1),
         }
+        if cfg.get("launch_overhead_us") is not None:
+            spec["launch_overhead_us"] = round(cfg["launch_overhead_us"], 2)
+        hw_summary[name] = spec
 
     result = {
         "stats": {
