@@ -1,13 +1,10 @@
 ---
 import operatorData from '../data/operators.json';
+import { siteConfig } from '../config';
 const { operators, hardware, hardware_specs } = operatorData;
 
-const hwShort: Record<string, string> = {
-  'XPU-A': 'XPU-A',
-  'H20': 'H20',
-};
-
-const prodHardware = ['XPU-A', 'H20'];
+const hwShort = siteConfig.hwShort;
+const prodHardware = siteConfig.prodHardware;
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 ---

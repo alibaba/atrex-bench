@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Extract operator data from data/ for the static site."""
+"""Extract operator data for the static site."""
 
 import json
+import os
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-DATA_DIR = REPO_ROOT / "data"
+DATA_DIR = REPO_ROOT / os.getenv("DATA_DIR", "data")
 HARDWARE_DIR = REPO_ROOT / "configs" / "hardware"
 OUTPUT_PATH = Path(__file__).resolve().parent.parent / "src" / "data" / "operators.json"
 
