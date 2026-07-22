@@ -33,6 +33,8 @@ a cached roofline.
 - **Multi-vendor GPUs**: the same operators, references, and evaluator run on both AMD (ROCm) and NVIDIA (CUDA), with prebuilt images for each.
 - **Three-stage evaluator**: compile, numerical correctness, and performance vs. roofline SOL.
 - **Generation harness** that drives an LLM CLI (Claude Code / Codex) inside a scoped workspace.
+- **Optional optimization agent**: [Atrex Kernel Agent](https://github.com/alibaba/atrex-kernel-agent)
+  provides a profile-driven workflow for GPU kernel implementation and iterative optimization.
 - **Leak-resistant by design**: a one-shot cleanup strips the checkout to the agent-visible
   surface, and provenance / roofline numbers are never staged for the agent.
 
