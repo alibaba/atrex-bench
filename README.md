@@ -145,6 +145,40 @@ evaluation session.
 - Each run writes `generated_kernel.py` plus a `generation.json` bundle and a trace sidecar
   under the output directory.
 
+##### Generate with Atrex Kernel Agent
+
+[Atrex Kernel Agent](https://github.com/alibaba/atrex-kernel-agent) provides the
+`gpu-kernel-optimizer` skill for profile-driven kernel implementation and optimization.
+Follow its
+[Interactive Skill installation guide](https://github.com/alibaba/atrex-kernel-agent#route-1-interactive-skill-skillmd)
+before running the command below.
+
+The default AKA installation base is `~/aka_kernel_opt`. The optimizer requires an explicit
+target platform. Set the platform in the selected backend's optimizer prompt before generating:
+
+```bash
+TARGET_GPU="<TARGET_GPU_MODEL>"
+sed -i "s/for the target GPU/for the ${TARGET_GPU} GPU/" \
+  prompt/flydsl/generate_kernel_with_optimizer.md
+
+CLAUDE_CONFIG_DIR="$HOME/aka_kernel_opt/.claude" \
+python scripts/run_generate.py \
+  --operator attention_forward \
+  --backend flydsl \
+  --template prompt/flydsl/generate_kernel_with_optimizer.md \
+  --cli claude \
+  --output-dir outputs/attention_forward_flydsl_agent \
+  --mirror-trace \
+  --skill
+```
+
+For Codex, set `CODEX_HOME="$HOME/aka_kernel_opt/.codex"` and use `--cli codex`. Ensure
+that `$CODEX_HOME/config.toml` contains a top-level `model = "..."` entry.
+
+The optimizer template explicitly invokes `gpu-kernel-optimizer`; `--skill` enables the
+tools required by its workflow. Runs generated with `--skill` use a different agent workflow
+and must not be compared directly with non-skill runs.
+
 #### Evaluate
 
 Evaluation needs the **full** repo (`metadata.json`, `roofline.json`, `configs/`, and the
