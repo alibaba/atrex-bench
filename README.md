@@ -38,6 +38,8 @@ a cached roofline.
 - **Multi-vendor GPUs**: the same operators, references, and evaluator run on both AMD (ROCm) and NVIDIA (CUDA), with prebuilt images for each.
 - **Three-stage evaluator**: compile, numerical correctness, and performance vs. roofline SOL.
 - **Generation harness** that drives an LLM CLI (Claude Code / Codex) inside a scoped workspace.
+- **Optional optimization agent**: [Atrex Kernel Agent](https://github.com/alibaba/atrex-kernel-agent)
+  provides a profile-driven workflow for GPU kernel implementation and iterative optimization.
 - **Leak-resistant by design**: a one-shot cleanup strips the checkout to the agent-visible
   surface, and provenance / roofline numbers are never staged for the agent.
 
@@ -147,6 +149,46 @@ evaluation session.
 - Backends: `triton`, `gluon`, `flydsl`, `cutedsl`. CLI: `--cli claude` (default) or `--cli codex`.
 - Each run writes `generated_kernel.py` plus a `generation.json` bundle and a trace sidecar
   under the output directory.
+
+##### Generate with Atrex Kernel Agent
+
+[Atrex Kernel Agent](https://github.com/alibaba/atrex-kernel-agent) provides the
+`gpu-kernel-optimizer` skill for profile-driven kernel implementation and optimization.
+Follow its
+[Interactive Skill installation guide](https://github.com/alibaba/atrex-kernel-agent#route-1-interactive-skill-skillmd)
+before running the command below.
+
+The default AKA installation base is `~/aka_kernel_opt`. If you installed AKA with a custom
+prefix, set `AKA_HOME` to that prefix. `run_generate.py` does not take a skill-directory
+argument; it lets the selected CLI discover skills from its config home. Point that config
+home at the matching AKA subdirectory when launching generation.
+
+The optimizer requires an explicit target platform. Set the platform in the selected
+backend's optimizer prompt before generating:
+
+```bash
+AKA_HOME="$HOME/aka_kernel_opt"
+TARGET_GPU="<TARGET_GPU_MODEL>"
+sed -i "s/for the target GPU/for the ${TARGET_GPU} GPU/" \
+  prompt/flydsl/generate_kernel_with_optimizer.md
+
+CLAUDE_CONFIG_DIR="$AKA_HOME/.claude" \
+python scripts/run_generate.py \
+  --operator attention_forward \
+  --backend flydsl \
+  --template prompt/flydsl/generate_kernel_with_optimizer.md \
+  --cli claude \
+  --output-dir outputs/attention_forward_flydsl_agent \
+  --mirror-trace \
+  --skill
+```
+
+For Codex, set `CODEX_HOME="$AKA_HOME/.codex"` and use `--cli codex`. Ensure
+that `$CODEX_HOME/config.toml` contains a top-level `model = "..."` entry.
+
+The optimizer template explicitly invokes `gpu-kernel-optimizer`; `--skill` enables the
+tools required by its workflow. Runs generated with `--skill` use a different agent workflow
+and must not be compared directly with non-skill runs.
 
 #### Evaluate
 
