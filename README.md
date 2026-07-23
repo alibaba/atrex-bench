@@ -26,6 +26,11 @@ a cached roofline.
   <img src="assets/atrex-bench-pipeline.png" alt="Atrex-Bench pipeline from production traces to roofline scoring" width="100%">
 </p>
 
+## News
+
+- [2026/07] The [preliminary technical report](https://arxiv.org/abs/2607.14541) is released, introducing Atrex-Bench and [Atrex-Kernel-Agent](https://github.com/alibaba/Atrex-Kernel-Agent), a profile-driven agent for iterative GPU kernel optimization.
+- [2026/06] The first version of Atrex-Bench is released: a production-trace-driven benchmark focused on compute-limited, memory-rich GPU fleets such as XPU-A and H20.
+
 ## Highlights
 
 - **30 operators**, mostly derived from real production traces (vLLM / SGLang / AITER / rtp-llm).
