@@ -26,13 +26,10 @@ export function getStaticPaths() {
 
 const { op } = Astro.props as { op: any };
 const { hardware, hardware_specs } = operatorData as any;
+import { siteConfig } from '../../config';
 
-const hwShort: Record<string, string> = {
-  'XPU-A': 'XPU-A',
-  'H20': 'H20',
-};
-
-const defaultHw = 'XPU-A';
+const hwShort = siteConfig.hwShort;
+const defaultHw = siteConfig.defaultHw;
 const details = op.shape_details || {};
 const shapeIds = Object.keys(details).sort((a, b) => parseInt(a) - parseInt(b));
 const hwList = hardware as string[];

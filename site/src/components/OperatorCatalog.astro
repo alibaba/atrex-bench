@@ -1,12 +1,13 @@
 ---
 import operatorData from '../data/operators.json';
+import { siteConfig } from '../config';
 const { operators } = operatorData;
 
 const dtypes = [...new Set(operators.map((o: any) => o.dtype))].sort();
 const frameworks = [...new Set(operators.map((o: any) => o.framework))].sort();
 const phases = [...new Set(operators.map((o: any) => o.phase))].sort();
 
-const prodSku = 'XPU-A';
+const prodSku = siteConfig.prodSku;
 
 function regimeBadge(regime: string) {
   if (regime === 'compute-bound') return 'bg-red-900/40 text-red-300 border-red-800';

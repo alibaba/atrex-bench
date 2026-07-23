@@ -83,7 +83,7 @@
   "operators.chart.subtitle": "Importance score reflects trace-derived GPU time share across production workloads",
 
   "data.page.title": "Benchmark Data",
-  "data.page.subtitle": "30 production operators with 440 hot shapes, importance weights from 1,303 production profiles, roofline bounds across 2 hardware platforms, and deployed kernel baselines.",
+  "data.page.subtitle": "",
 
   "quickstart.title": "Quick Start",
   "quickstart.intro": "Get up and running with Atrex-Bench in minutes using Docker and the built-in CLI tools.",
