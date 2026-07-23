@@ -153,15 +153,21 @@ Follow its
 [Interactive Skill installation guide](https://github.com/alibaba/atrex-kernel-agent#route-1-interactive-skill-skillmd)
 before running the command below.
 
-The default AKA installation base is `~/aka_kernel_opt`. The optimizer requires an explicit
-target platform. Set the platform in the selected backend's optimizer prompt before generating:
+The default AKA installation base is `~/aka_kernel_opt`. If you installed AKA with a custom
+prefix, set `AKA_HOME` to that prefix. `run_generate.py` does not take a skill-directory
+argument; it lets the selected CLI discover skills from its config home. Point that config
+home at the matching AKA subdirectory when launching generation.
+
+The optimizer requires an explicit target platform. Set the platform in the selected
+backend's optimizer prompt before generating:
 
 ```bash
+AKA_HOME="$HOME/aka_kernel_opt"
 TARGET_GPU="<TARGET_GPU_MODEL>"
 sed -i "s/for the target GPU/for the ${TARGET_GPU} GPU/" \
   prompt/flydsl/generate_kernel_with_optimizer.md
 
-CLAUDE_CONFIG_DIR="$HOME/aka_kernel_opt/.claude" \
+CLAUDE_CONFIG_DIR="$AKA_HOME/.claude" \
 python scripts/run_generate.py \
   --operator attention_forward \
   --backend flydsl \
@@ -172,7 +178,7 @@ python scripts/run_generate.py \
   --skill
 ```
 
-For Codex, set `CODEX_HOME="$HOME/aka_kernel_opt/.codex"` and use `--cli codex`. Ensure
+For Codex, set `CODEX_HOME="$AKA_HOME/.codex"` and use `--cli codex`. Ensure
 that `$CODEX_HOME/config.toml` contains a top-level `model = "..."` entry.
 
 The optimizer template explicitly invokes `gpu-kernel-optimizer`; `--skill` enables the
