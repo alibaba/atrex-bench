@@ -1,6 +1,9 @@
 <div align="center">
 
-# Atrex-Bench
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/atrex-bench-logo-dark.png">
+  <img src="assets/atrex-bench-logo-light.png" alt="Atrex-Bench" width="55%">
+</picture>
 
 **End-to-End Operator Generation Benchmark for Multiple DSLs**
 
