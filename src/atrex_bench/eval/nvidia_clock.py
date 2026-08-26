@@ -49,6 +49,12 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
+def _effective_uid() -> int:
+    """Return the POSIX effective uid, or root-equivalent on non-POSIX hosts."""
+    geteuid = getattr(os, "geteuid", None)
+    return int(geteuid()) if geteuid is not None else 0
+
+
 def _validate_gpu_selector(selector: str) -> None:
     if selector.isdigit() or _GPU_UUID_PATTERN.fullmatch(selector):
         return
@@ -72,14 +78,14 @@ class NvidiaSmi:
         self,
         *,
         run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
-        geteuid: Callable[[], int] = os.geteuid,
+        geteuid: Callable[[], int] | None = None,
         now: Callable[[], str] = _utc_now,
         timeout_s: float = 10.0,
     ) -> None:
         if timeout_s <= 0:
             raise ValueError("timeout_s must be positive")
         self._run_command = run
-        self._geteuid = geteuid
+        self._geteuid = geteuid or _effective_uid
         self._now = now
         self._timeout_s = timeout_s
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import copy
 import hashlib
 import json
@@ -74,8 +75,8 @@ _PENDING_EVAL_REASON = "Evaluation did not complete."
 _TORCH_COMPILE_EVAL_MODE = "torch_compile_reference"
 _CANDIDATE_EVAL_MODE = "candidate"
 _TORCH_COMPILE_SKIP_REASON = "Skipped in torch_compile_reference mode."
-_CORRECTNESS_ONLY_SKIP_REASON = "Skipped in performance_only mode."
-_PERFORMANCE_ONLY_SKIP_REASON = "Skipped in correctness_only mode."
+_SKIP_CORRECTNESS_REASON = "Skipped in performance_only mode."
+_SKIP_PERFORMANCE_REASON = "Skipped in correctness_only mode."
 _CORRECTNESS_FAILURE_PERFORMANCE_SKIP_REASON = (
     "Skipped because correctness stage did not pass."
 )
@@ -90,6 +91,8 @@ _DEFAULT_CANDIDATE_TIMEOUT_S = 60.0
 _DEFAULT_PERF_TIMEOUT_S = 600.0
 _DEFAULT_COMPILE_TIMEOUT_S = 300.0
 _SUBPROCESS_SHUTDOWN_TIMEOUT_S = 5.0
+_COMPILE_READY_FILENAME = ".compile-ready"
+_COMPILE_READY_POLL_INTERVAL_S = 0.2
 _DEFAULT_BENCHMARK_MODE = "eager"
 _DEFAULT_CUDA_GRAPH_CACHE_FLUSH_MB = 1024
 _DEFAULT_GRAPH_ATOL = 1e-2
@@ -169,6 +172,10 @@ _SHAPE_SUBWORKER_STDERR_TAIL_LINES = 15
 _SHAPE_WALL_TIMEOUT_FLOOR_S = 60.0
 _REFERENCE_OVERHEAD_BUDGET_S = 60.0
 _WORKER_OVERHEAD_BUDGET_S = 30.0
+
+
+class _CompileStageTimeoutExpired(subprocess.TimeoutExpired):
+    """The candidate worker did not finish its compile stage in time."""
 
 
 def _derived_shape_wall_timeout_s(
@@ -286,6 +293,30 @@ def _save_eval_json(data: dict, path: Path) -> None:
         ) as handle:
             temporary_path = Path(handle.name)
             handle.write(text + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+    except BaseException:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+        raise
+
+
+def _save_text_atomic(text: str, path: Path) -> None:
+    """Persist a small UTF-8 control file atomically."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary_path = Path(handle.name)
+            handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary_path, path)
@@ -663,18 +694,73 @@ def _kill_process_group(process: subprocess.Popen) -> None:
         pass
 
 
+def _wait_for_compile_ready(
+    process: subprocess.Popen,
+    *,
+    cmd: list[str],
+    ready_path: Path | None,
+    timeout_s: float | None,
+) -> None:
+    """Wait until compile completes or the worker exits, enforcing its deadline."""
+    if ready_path is None or timeout_s is None or timeout_s <= 0:
+        return
+
+    deadline = time.monotonic() + timeout_s
+    while not ready_path.is_file():
+        if process.poll() is not None:
+            return
+        remaining_s = deadline - time.monotonic()
+        if remaining_s <= 0:
+            raise _CompileStageTimeoutExpired(cmd, timeout_s)
+        time.sleep(min(_COMPILE_READY_POLL_INTERVAL_S, remaining_s))
+
+
+def _remaining_subprocess_timeout(
+    timeout_s: float | None,
+    *,
+    started_at: float,
+) -> float | None:
+    if timeout_s is None:
+        return None
+    return max(0.0, timeout_s - (time.monotonic() - started_at))
+
+
+@contextlib.contextmanager
+def _sigterm_as_system_exit():
+    """Turn parent SIGTERM into a catchable exit while a worker is active."""
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    previous_handler = signal.getsignal(signal.SIGTERM)
+
+    def _handle_sigterm(signum, _frame) -> None:
+        raise SystemExit(128 + signum)
+
+    signal.signal(signal.SIGTERM, _handle_sigterm)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous_handler)
+
+
 def _run_subprocess_with_live_stderr(
     cmd: list[str],
     *,
     cwd: str,
+    env: dict[str, str] | None = None,
     timeout_s: float | None = None,
+    compile_ready_path: Path | None = None,
+    compile_timeout_s: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a subprocess while mirroring its stderr to this process in real time.
 
     ``timeout_s`` is an OS-level ceiling; None means wait indefinitely, which is
-    what every caller did before there was one. On expiry the child's whole
-    process group is SIGKILLed and ``subprocess.TimeoutExpired`` propagates.
+    what every caller did before there was one. ``compile_timeout_s`` independently
+    bounds the interval until ``compile_ready_path`` appears. On either expiry the
+    child's whole process group is SIGKILLed and the timeout exception propagates.
     """
+    started_at = time.monotonic()
     process = subprocess.Popen(
         cmd,
         cwd=cwd,
@@ -684,6 +770,7 @@ def _run_subprocess_with_live_stderr(
         encoding="utf-8",
         errors="replace",
         bufsize=1,
+        env=env,
         # Own process group, so a timeout can take the descendants with it.
         start_new_session=os.name == "posix",
     )
@@ -715,49 +802,52 @@ def _run_subprocess_with_live_stderr(
     stdout_thread.start()
     stderr_thread.start()
     try:
-        returncode = process.wait(timeout=timeout_s)
-    except subprocess.TimeoutExpired:
+        with _sigterm_as_system_exit():
+            _wait_for_compile_ready(
+                process,
+                cmd=cmd,
+                ready_path=compile_ready_path,
+                timeout_s=compile_timeout_s,
+            )
+            returncode = process.wait(
+                timeout=_remaining_subprocess_timeout(
+                    timeout_s,
+                    started_at=started_at,
+                )
+            )
+    except (_CompileStageTimeoutExpired, subprocess.TimeoutExpired) as error:
         _kill_process_group(process)
-        stdout_thread.join(timeout=_SUBPROCESS_SHUTDOWN_TIMEOUT_S)
-        stderr_thread.join(timeout=_SUBPROCESS_SHUTDOWN_TIMEOUT_S)
-        raise
-    except BaseException:
-        cleanup_errors: list[str] = []
-        needs_kill = False
         try:
-            process.terminate()
-        except Exception as error:
-            cleanup_errors.append(f"terminate failed: {error}")
-            needs_kill = True
-        else:
-            try:
-                process.wait(timeout=_SUBPROCESS_SHUTDOWN_TIMEOUT_S)
-            except subprocess.TimeoutExpired:
-                needs_kill = True
-            except Exception as error:
-                cleanup_errors.append(f"wait after terminate failed: {error}")
-                needs_kill = True
-
-        if needs_kill:
-            try:
-                process.kill()
-            except Exception as error:
-                cleanup_errors.append(f"kill failed: {error}")
-            else:
-                try:
-                    process.wait(timeout=_SUBPROCESS_SHUTDOWN_TIMEOUT_S)
-                except subprocess.TimeoutExpired as error:
-                    cleanup_errors.append(f"wait after kill timed out: {error}")
-                except Exception as error:
-                    cleanup_errors.append(f"wait after kill failed: {error}")
-
-        stdout_thread.join(timeout=_SUBPROCESS_SHUTDOWN_TIMEOUT_S)
-        stderr_thread.join(timeout=_SUBPROCESS_SHUTDOWN_TIMEOUT_S)
+            process.wait(timeout=_SUBPROCESS_SHUTDOWN_TIMEOUT_S)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
         for stream in (process.stdout, process.stderr):
             if stream is not None:
                 stream.close()
         stdout_thread.join(timeout=_SUBPROCESS_SHUTDOWN_TIMEOUT_S)
         stderr_thread.join(timeout=_SUBPROCESS_SHUTDOWN_TIMEOUT_S)
+        error.stdout = "".join(stdout_chunks)
+        error.stderr = "".join(stderr_chunks)
+        raise
+    except BaseException:
+        cleanup_errors: list[str] = []
+        _kill_process_group(process)
+        try:
+            process.wait(timeout=_SUBPROCESS_SHUTDOWN_TIMEOUT_S)
+        except subprocess.TimeoutExpired as error:
+            cleanup_errors.append(f"wait after process-group kill timed out: {error}")
+        except Exception as error:
+            cleanup_errors.append(f"wait after process-group kill failed: {error}")
+
+        for stream in (process.stdout, process.stderr):
+            if stream is not None:
+                stream.close()
+        stdout_thread.join(timeout=_SUBPROCESS_SHUTDOWN_TIMEOUT_S)
+        stderr_thread.join(timeout=_SUBPROCESS_SHUTDOWN_TIMEOUT_S)
+        if stdout_thread.is_alive():
+            cleanup_errors.append("stdout drain thread did not stop after stream close")
+        if stderr_thread.is_alive():
+            cleanup_errors.append("stderr drain thread did not stop after stream close")
         if cleanup_errors:
             _log("[worker] interruption cleanup warning: " + "; ".join(cleanup_errors))
         raise
@@ -1349,7 +1439,7 @@ def _performance_verdict(
     if validation_mode == _VALIDATION_MODE_CORRECTNESS_ONLY:
         return StageVerdict(
             status="skipped",
-            reason=_PERFORMANCE_ONLY_SKIP_REASON,
+            reason=_SKIP_PERFORMANCE_REASON,
         )
     if (
         validation_mode == _VALIDATION_MODE_FULL
@@ -1529,8 +1619,8 @@ def _resolve_checkpoint_root(artifact_dir: Path, checkpoint_dir: Path | None) ->
     return artifact_dir / checkpoint_dir
 
 
-def _isolate_torch_extension_build_dir(artifact_dir: Path) -> None:
-    """Give this evaluation its own torch cpp_extension build directory.
+def _torch_extension_worker_environment(artifact_dir: Path) -> dict[str, str]:
+    """Build a worker environment with an evaluation-scoped extension cache.
 
     Nothing here builds extensions, but candidates do, and torch defaults every
     build to a shared ``~/.cache/torch_extensions/<name>``. Concurrent
@@ -1539,10 +1629,12 @@ def _isolate_torch_extension_build_dir(artifact_dir: Path) -> None:
     queues behind it. Isolating per evaluation is the only fix available to the
     side that owns the environment.
 
-    ``setdefault`` so an operator who already pointed this somewhere keeps it.
-    Set in the parent and inherited by the worker and its per-shape children.
+    The parent environment is not mutated. The top-level worker receives this
+    copy and its per-shape children inherit the evaluation-specific directory.
     """
-    os.environ.setdefault("TORCH_EXTENSIONS_DIR", str(artifact_dir / "torch_ext"))
+    worker_environment = os.environ.copy()
+    worker_environment["TORCH_EXTENSIONS_DIR"] = str(artifact_dir / "torch_ext")
+    return worker_environment
 
 
 # ---------------------------------------------------------------------------
@@ -1706,7 +1798,7 @@ def _subworker_failure_results(
         return (
             CorrectnessShapeResult(
                 status="skipped",
-                reason=_CORRECTNESS_ONLY_SKIP_REASON,
+                reason=_SKIP_CORRECTNESS_REASON,
             ),
             PerformanceShapeResult(error=reason),
             None,
@@ -1939,7 +2031,7 @@ def _run_single_shape_main(
     if validation_mode == _VALIDATION_MODE_PERFORMANCE_ONLY:
         correctness_result = CorrectnessShapeResult(
             status="skipped",
-            reason=_CORRECTNESS_ONLY_SKIP_REASON,
+            reason=_SKIP_CORRECTNESS_REASON,
         )
     else:
         correctness_result = check_correctness(
@@ -2078,6 +2170,7 @@ def _run_single_shape_torch_compile_subprocess(
     shape_id: str,
     warmup_iters: int,
     bench_iters: int,
+    shape_wall_timeout_s: float,
 ) -> tuple[CorrectnessShapeResult, PerformanceShapeResult]:
     """Spawn one subprocess to benchmark torch.compile(reference) for one shape."""
     shape_result_path = shape_results_dir / f"{shape_id}.json"
@@ -2095,14 +2188,34 @@ def _run_single_shape_torch_compile_subprocess(
     )
 
     try:
-        completed = subprocess.run(
+        completed = _run_subprocess_with_live_stderr(
             cmd,
             cwd=str(Path(__file__).resolve().parents[1]),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
+            timeout_s=shape_wall_timeout_s,
+        )
+    except subprocess.TimeoutExpired as error:
+        stderr_tail = ""
+        if error.stderr:
+            tail_source = (
+                error.stderr
+                if isinstance(error.stderr, str)
+                else error.stderr.decode("utf-8", errors="replace")
+            )
+            stderr_tail = "\nstderr (tail):\n" + "\n".join(
+                tail_source.splitlines()[-_SHAPE_SUBWORKER_STDERR_TAIL_LINES:]
+            )
+        return (
+            CorrectnessShapeResult(
+                status="skipped",
+                reason=_TORCH_COMPILE_SKIP_REASON,
+            ),
+            PerformanceShapeResult(
+                error=(
+                    "Torch-compile per-shape sub-worker exceeded "
+                    f"{shape_wall_timeout_s}s wall-clock budget; OS-killed "
+                    f"(SIGKILL).{stderr_tail}"
+                )
+            ),
         )
     except Exception:
         return (
@@ -2181,6 +2294,8 @@ def _run_torch_compile_worker(
     config_version: str,
     clock_locked: bool,
     require_clock_locked: bool = False,
+    compile_timeout_s: int | float = _DEFAULT_COMPILE_TIMEOUT_S,
+    perf_timeout_s: int | float = _DEFAULT_PERF_TIMEOUT_S,
 ) -> dict[str, object]:
     """Benchmark torch.compile(reference) across all shapes and persist JSON."""
     worker_started = time.perf_counter()
@@ -2259,6 +2374,12 @@ def _run_torch_compile_worker(
 
     shape_results_dir = artifact_dir / ".shape_results"
     shape_results_dir.mkdir(parents=True, exist_ok=True)
+    shape_wall_timeout_s = _derived_shape_wall_timeout_s(
+        compile_timeout_s,
+        perf_timeout_s,
+        num_correctness_cases=0,
+        validation_mode=_VALIDATION_MODE_PERFORMANCE_ONLY,
+    )
 
     for index, shape_id in enumerate(shape_ids, start=1):
         shape_started = time.perf_counter()
@@ -2275,6 +2396,7 @@ def _run_torch_compile_worker(
                 shape_id=shape_id,
                 warmup_iters=warmup_iters,
                 bench_iters=bench_iters,
+                shape_wall_timeout_s=shape_wall_timeout_s,
             )
         )
         correctness_per_shape[shape_id] = correctness_result
@@ -2435,6 +2557,10 @@ def _run_eval_worker(
             _check_untrusted_integrity(integrity_snapshot)
         except RewardHackDetected as reward_hack:
             compile_result = CompileResult(status="failed", reason=str(reward_hack))
+    _save_text_atomic(
+        compile_result.status,
+        artifact_dir / _COMPILE_READY_FILENAME,
+    )
     compile_suffix = (
         ""
         if compile_result.reason is None
@@ -2691,6 +2817,8 @@ def _run_torch_compile_eval_process(
     config_version: str = _DEFAULT_CONFIG_VERSION,
     clock_locked: bool = False,
     require_clock_locked: bool = False,
+    compile_timeout_s: int | float = _DEFAULT_COMPILE_TIMEOUT_S,
+    perf_timeout_s: int | float = _DEFAULT_PERF_TIMEOUT_S,
 ) -> dict[str, object]:
     """Benchmark torch.compile(reference) across all shapes."""
     resolved_timestamp = get_timestamp(timestamp)
@@ -2701,7 +2829,7 @@ def _run_torch_compile_eval_process(
         timestamp=resolved_timestamp,
     )
     artifact_dir.mkdir(parents=True, exist_ok=True)
-    _isolate_torch_extension_build_dir(artifact_dir)
+    worker_environment = _torch_extension_worker_environment(artifact_dir)
 
     runner_config = _build_runner_config(
         config_version=config_version,
@@ -2747,6 +2875,10 @@ def _run_torch_compile_eval_process(
         str(warmup_iters),
         "--bench-iters",
         str(bench_iters),
+        "--compile-timeout-s",
+        str(compile_timeout_s),
+        "--perf-timeout-s",
+        str(perf_timeout_s),
         "--config-version",
         config_version,
         "--artifact-dir",
@@ -2775,6 +2907,7 @@ def _run_torch_compile_eval_process(
         completed = _run_subprocess_with_live_stderr(
             worker_command,
             cwd=str(Path(__file__).resolve().parents[1]),
+            env=worker_environment,
         )
     except Exception:
         failure_payload = _annotate_failure_payload(
@@ -2845,7 +2978,7 @@ def _run_eval_process(
         timestamp=resolved_timestamp,
     )
     artifact_dir.mkdir(parents=True, exist_ok=True)
-    _isolate_torch_extension_build_dir(artifact_dir)
+    worker_environment = _torch_extension_worker_environment(artifact_dir)
 
     runner_config = _build_runner_config(
         config_version=config_version,
@@ -2958,7 +3091,8 @@ def _run_eval_process(
         num_correctness_cases=num_correctness_cases,
         validation_mode=validation_mode,
     )
-
+    compile_ready_path = artifact_dir / _COMPILE_READY_FILENAME
+    compile_ready_path.unlink(missing_ok=True)
     try:
         _log(
             f"[eval] launching worker op={reference_dir.name} "
@@ -2967,18 +3101,27 @@ def _run_eval_process(
         completed = _run_subprocess_with_live_stderr(
             worker_command,
             cwd=str(Path(__file__).resolve().parents[1]),
+            env=worker_environment,
             timeout_s=worker_wall_timeout_s,
+            compile_ready_path=compile_ready_path,
+            compile_timeout_s=float(compile_timeout_s),
         )
+    except _CompileStageTimeoutExpired:
+        failure_payload = _annotate_failure_payload(
+            _load_saved_payload(eval_output_path) or initial_payload,
+            f"Compile stage exceeded {compile_timeout_s}s wall-clock budget; "
+            "worker process group OS-killed (SIGKILL).",
+        )
+        _save_eval_json(failure_payload, eval_output_path)
+        return failure_payload
     except subprocess.TimeoutExpired:
-        # The worker outlived its whole budget, so the compile stage is the only
-        # thing left that could still be running: every later stage is bounded by
-        # a per-shape ceiling of its own. Say so, instead of attaching a bare
-        # TimeoutExpired traceback.
+        # Independent compile timeout already guards stage 0. This is the larger
+        # whole-worker backstop for cumulative shape work and teardown.
         failure_payload = _annotate_failure_payload(
             _load_saved_payload(eval_output_path) or initial_payload,
             f"Worker exceeded {worker_wall_timeout_s}s wall-clock budget "
-            f"(compile <= {compile_timeout_s}s plus a per-shape ceiling for each "
-            "shape); process group OS-killed (SIGKILL).",
+            f"(compile budget {compile_timeout_s}s plus a per-shape ceiling for "
+            "each shape); process group OS-killed (SIGKILL).",
         )
         _save_eval_json(failure_payload, eval_output_path)
         return failure_payload
@@ -2989,7 +3132,8 @@ def _run_eval_process(
         )
         _save_eval_json(failure_payload, eval_output_path)
         return failure_payload
-
+    finally:
+        compile_ready_path.unlink(missing_ok=True)
     saved_payload = _load_saved_payload(eval_output_path)
     if completed.returncode != 0:
         failure_payload = _annotate_failure_payload(
@@ -3185,6 +3329,8 @@ def run_torch_compile_eval(
     clock_locked: bool = False,
     require_clock_locked: bool = False,
     clock_lock_config: ClockLockConfig | None = None,
+    compile_timeout_s: int | float = _DEFAULT_COMPILE_TIMEOUT_S,
+    perf_timeout_s: int | float = _DEFAULT_PERF_TIMEOUT_S,
 ) -> dict[str, object]:
     """Run torch.compile evaluation under one optional parent clock lock."""
     resolved_timestamp = get_timestamp(timestamp)
@@ -3234,6 +3380,8 @@ def run_torch_compile_eval(
             config_version=config_version,
             clock_locked=effective_clock_locked,
             require_clock_locked=effective_require_clock_locked,
+            compile_timeout_s=compile_timeout_s,
+            perf_timeout_s=perf_timeout_s,
         )
 
     return _evaluate_with_clock_policy(
@@ -3547,7 +3695,7 @@ def main() -> None:
         default=None,
         help=(
             "Versioned runner config identifier (placed under runner_config.config_version "
-            "in eval_result.json; conventionally points at configs/runner/<version>.yaml)"
+            "in eval_result.json; conventionally points at configs/runner/<version>.json)"
         ),
     )
     parser.add_argument(
@@ -3673,12 +3821,11 @@ def main() -> None:
         type=float,
         default=None,
         help=(
-            "Budget (seconds) for the candidate's compile stage, which runs once "
-            "before any shape. It is charged into an OS-level wall-clock ceiling "
-            "on the whole worker process, whose group is SIGKILLed on expiry -- "
-            "the only thing that stops a hang inside a JIT extension build, "
-            "which in-Python timeouts cannot interrupt. Pass <= 0 to run the "
-            "worker with no wall ceiling. Default 300s."
+            "Independent wall-clock limit (seconds) for the candidate's compile "
+            "stage, which runs once before any shape. The worker process group is "
+            "SIGKILLed when compile exceeds it, including descendant compilers. "
+            "The same budget is also included in the whole-worker backstop. Pass "
+            "<= 0 to disable both limits. Default 300s."
         ),
     )
     parser.add_argument(
@@ -4070,6 +4217,8 @@ def main() -> None:
             config_version=args.config_version,
             clock_locked=args.clock_locked,
             require_clock_locked=args.require_clock_locked,
+            compile_timeout_s=args.compile_timeout_s,
+            perf_timeout_s=args.perf_timeout_s,
         )
         raise SystemExit(0)
 
@@ -4125,6 +4274,8 @@ def main() -> None:
             clock_locked=args.clock_locked,
             require_clock_locked=args.require_clock_locked,
             clock_lock_config=clock_lock_config,
+            compile_timeout_s=args.compile_timeout_s,
+            perf_timeout_s=args.perf_timeout_s,
         )
         kernel_name = _kernel_name(args.reference_dir, args.reference_dir / "reference.py")
         _, eval_output_path = _build_artifact_paths(

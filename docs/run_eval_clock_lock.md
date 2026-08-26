@@ -74,6 +74,8 @@ By default, the workflow:
 
 `--allow-busy-gpu` skips only the compute-process check; it does not bypass the device-level `flock`. Use it only in a controlled environment where other processes are known not to affect the measurements or be affected by clock locking.
 
+Managed mode requires the scheduler to guarantee exclusive GPU access. `flock` provides mutual exclusion only among processes on the same host that share the same visible lock directory. A Pod-local `/tmp` does not provide cross-Pod exclusion, and NFS locks are not used as distributed locks. Kubernetes deployments must use the device plugin, node scheduling, and resource quotas to ensure that each physical GPU is assigned to only one evaluation Pod.
+
 ## Applying, Verifying, and Restoring Clocks
 
 The managed lifecycle follows this fixed sequence:
@@ -99,7 +101,7 @@ Configurable options:
 - `--clock-lock-monitor` / `--no-clock-lock-monitor`: full-window monitoring is enabled by default in managed mode.
 - `--clock-lock-sample-interval-ms`: defaults to `10`.
 - `--clock-lock-runtime-tolerance-mhz`: defaults to `0`. In strict mode, any sample outside the target range causes the result to fail.
-- `--clock-lock-fail-on-deviation` / `--no-clock-lock-fail-on-deviation`: defaults to failing on deviation. When disabled, an evaluation may continue only if sampling is complete and the sole deviation is graphics-clock downclocking, with no forbidden events. The result still records `measurement_verified=false`.
+- `--clock-lock-fail-on-deviation` / `--no-clock-lock-fail-on-deviation`: defaults to failing on deviation. When disabled, an evaluation may continue only if sampling is complete and the sole deviation is graphics-clock downclocking, with no forbidden events. The result records `clock_locked=false`, `clock_lock_verified=false`, and `measurement_verified=false`.
 - `--allow-busy-gpu`: disables the default rejection of existing compute processes.
 
 SW power-cap events are diagnostic counters only when the measured graphics clock remains on target. HW slowdown, SW/HW thermal slowdown, and HW power-brake slowdown always invalidate measurement-window verification.

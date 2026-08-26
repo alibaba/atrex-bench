@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import io
 import subprocess
 from dataclasses import dataclass, field
@@ -315,6 +316,12 @@ def test_non_root_monitor_uses_noninteractive_sudo(tmp_path: Path) -> None:
     monitor.stop()
 
     assert popen.calls[0][0][:3] == ["sudo", "-n", "nvidia-smi"]
+
+
+def test_clock_monitor_does_not_bind_posix_uid_lookup_at_import_time() -> None:
+    parameter = inspect.signature(NvidiaClockMonitor).parameters["geteuid"]
+
+    assert parameter.default is None
 
 
 def test_monitor_parse_error_invalidates_measurement(tmp_path: Path) -> None:

@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -409,25 +410,20 @@ def test_torch_extension_build_dir_is_isolated_per_evaluation(
     """
     from scripts import run_eval as run_eval_module
 
-    monkeypatch.delenv("TORCH_EXTENSIONS_DIR", raising=False)
-    artifact_dir = tmp_path / "20260804-000000" / "op"
-
-    run_eval_module._isolate_torch_extension_build_dir(artifact_dir)
-
-    assert os.environ["TORCH_EXTENSIONS_DIR"] == str(artifact_dir / "torch_ext")
-
-
-def test_torch_extension_build_dir_respects_an_existing_setting(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An operator who already pointed this somewhere keeps their choice."""
-    from scripts import run_eval as run_eval_module
-
     monkeypatch.setenv("TORCH_EXTENSIONS_DIR", "/somewhere/chosen")
+    first_artifact_dir = tmp_path / "20260804-000000" / "op"
+    second_artifact_dir = tmp_path / "20260804-000001" / "op"
 
-    run_eval_module._isolate_torch_extension_build_dir(tmp_path / "op")
+    first_env = run_eval_module._torch_extension_worker_environment(
+        first_artifact_dir
+    )
+    second_env = run_eval_module._torch_extension_worker_environment(
+        second_artifact_dir
+    )
 
+    assert first_env["TORCH_EXTENSIONS_DIR"] == str(first_artifact_dir / "torch_ext")
+    assert second_env["TORCH_EXTENSIONS_DIR"] == str(second_artifact_dir / "torch_ext")
+    assert first_env["TORCH_EXTENSIONS_DIR"] != second_env["TORCH_EXTENSIONS_DIR"]
     assert os.environ["TORCH_EXTENSIONS_DIR"] == "/somewhere/chosen"
 
 
@@ -2079,7 +2075,7 @@ def test_worker_records_mode_specific_performance_verdict(
     correctness = run_eval_module.CorrectnessShapeResult(
         status=correctness_status,
         reason=(
-            run_eval_module._CORRECTNESS_ONLY_SKIP_REASON
+            run_eval_module._SKIP_CORRECTNESS_REASON
             if correctness_status == "skipped"
             else None
         ),
@@ -2381,65 +2377,67 @@ def test_worker_subprocess_stderr_is_mirrored_live(
 
 
 @pytest.mark.parametrize(
-    ("shutdown_mode", "expected_kill_calls"),
-    [("terminates", 0), ("times_out", 1), ("terminate_error", 1)],
+    "interrupt",
+    [KeyboardInterrupt("cancel evaluation"), SystemExit(143)],
+    ids=["sigint", "sigterm"],
 )
-def test_subprocess_interrupt_terminates_child(
+def test_subprocess_interrupt_kills_process_group(
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    shutdown_mode: str,
-    expected_kill_calls: int,
+    interrupt: BaseException,
 ) -> None:
     from scripts import run_eval as run_eval_module
-
-    interrupt = KeyboardInterrupt("cancel evaluation")
 
     class InterruptingProcess:
         def __init__(self) -> None:
             self.stdout = io.StringIO("partial stdout\n")
             self.stderr = io.StringIO("partial stderr\n")
             self.wait_calls: list[float | None] = []
-            self.terminate_calls = 0
-            self.kill_calls = 0
 
         def wait(self, timeout: float | None = None) -> int:
             self.wait_calls.append(timeout)
             if len(self.wait_calls) == 1:
                 raise interrupt
-            if shutdown_mode == "times_out" and len(self.wait_calls) == 2:
-                raise subprocess.TimeoutExpired("worker", timeout=timeout)
-            return -15
-
-        def terminate(self) -> None:
-            self.terminate_calls += 1
-            if shutdown_mode == "terminate_error":
-                raise OSError("cannot signal worker")
-
-        def kill(self) -> None:
-            self.kill_calls += 1
+            return -9
 
     process = InterruptingProcess()
+    killed_processes = []
     monkeypatch.setattr(
         run_eval_module.subprocess,
         "Popen",
         lambda *args, **kwargs: process,
     )
+    monkeypatch.setattr(
+        run_eval_module,
+        "_kill_process_group",
+        lambda target: killed_processes.append(target),
+    )
 
-    with pytest.raises(KeyboardInterrupt) as exc_info:
+    with pytest.raises(type(interrupt)) as exc_info:
         run_eval_module._run_subprocess_with_live_stderr(
             ["fake-worker"],
             cwd="/tmp",
         )
 
     assert exc_info.value is interrupt
-    assert process.terminate_calls == 1
-    assert process.kill_calls == expected_kill_calls
+    assert killed_processes == [process]
     assert process.wait_calls[0] is None
     assert all(timeout is not None and timeout > 0 for timeout in process.wait_calls[1:])
     assert process.stdout.closed is True
     assert process.stderr.closed is True
-    if shutdown_mode == "terminate_error":
-        assert "cannot signal worker" in capsys.readouterr().err
+
+
+def test_parent_sigterm_handler_raises_system_exit_and_restores() -> None:
+    from scripts import run_eval as run_eval_module
+
+    previous_handler = signal.getsignal(signal.SIGTERM)
+    with run_eval_module._sigterm_as_system_exit():
+        temporary_handler = signal.getsignal(signal.SIGTERM)
+        assert callable(temporary_handler)
+        with pytest.raises(SystemExit) as exc_info:
+            temporary_handler(signal.SIGTERM, None)
+
+    assert exc_info.value.code == 143
+    assert signal.getsignal(signal.SIGTERM) is previous_handler
 
 
 def test_run_eval_skips_later_stages_after_compile_failure(tmp_path: Path) -> None:
@@ -2871,6 +2869,88 @@ def test_worker_subprocess_is_killed_when_it_outlives_its_budget() -> None:
         )
 
 
+def test_compile_phase_timeout_does_not_wait_for_worker_total_budget(
+    tmp_path: Path,
+) -> None:
+    """A stuck compile is killed at its own deadline, before shape budgets."""
+    from scripts import run_eval as run_eval_module
+
+    with pytest.raises(run_eval_module._CompileStageTimeoutExpired):
+        run_eval_module._run_subprocess_with_live_stderr(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            cwd=str(Path(__file__).resolve().parents[1]),
+            timeout_s=30,
+            compile_ready_path=tmp_path / "compile-ready",
+            compile_timeout_s=0.3,
+        )
+
+
+def test_compile_ready_poll_interval_avoids_metadata_hot_loop() -> None:
+    from scripts import run_eval as run_eval_module
+
+    assert run_eval_module._COMPILE_READY_POLL_INTERVAL_S >= 0.2
+
+
+def test_compile_ready_signal_hands_remaining_budget_to_worker(
+    tmp_path: Path,
+) -> None:
+    """A completed compile is not killed when later worker stages run longer."""
+    from scripts import run_eval as run_eval_module
+
+    ready_path = tmp_path / "compile-ready"
+    completed = run_eval_module._run_subprocess_with_live_stderr(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import pathlib, sys, time; "
+                "pathlib.Path(sys.argv[1]).write_text('ready'); "
+                "time.sleep(0.3)"
+            ),
+            str(ready_path),
+        ],
+        cwd=str(Path(__file__).resolve().parents[1]),
+        timeout_s=2,
+        compile_ready_path=ready_path,
+        compile_timeout_s=0.5,
+    )
+
+    assert completed.returncode == 0
+
+
+def test_run_eval_reports_compile_timeout_before_worker_total_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The public candidate path attributes a stuck import to compile timeout."""
+    from scripts import run_eval as run_eval_module
+
+    candidate_path = _write_candidate_file(
+        tmp_path,
+        "stuck_candidate.py",
+        "import time\ntime.sleep(30)\n",
+    )
+    reference_dir = _build_reference_dir(tmp_path, name="compile_timeout_op")
+    monkeypatch.setattr(
+        run_eval_module,
+        "_derived_worker_wall_timeout_s",
+        lambda *_args, **_kwargs: 0.8,
+    )
+
+    result = run_eval_module._run_eval_process(
+        input_path=candidate_path,
+        reference_dir=reference_dir,
+        output_root=tmp_path / "output",
+        timestamp="20260101T000000Z",
+        compile_timeout_s=0.1,
+        candidate_timeout_s=0,
+        perf_timeout_s=0,
+        collect_kernel_events=False,
+    )
+
+    assert str(result["error"]).startswith("Compile stage exceeded 0.1s")
+
+
 def test_worker_timeout_kills_the_process_group_not_just_the_child(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3018,6 +3098,48 @@ def test_single_shape_subprocess_synthesizes_failed_on_wall_timeout(
     assert perf.samples == []
     # compile status unknown when sub-worker was OS-killed
     assert compile_succeeded is None
+
+
+def test_torch_compile_shape_subprocess_synthesizes_failure_on_wall_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import run_eval as run_eval_module
+
+    observed_timeout: list[float] = []
+
+    def fake_run_with_live_stderr(*args, **kwargs):
+        observed_timeout.append(kwargs["timeout_s"])
+        raise subprocess.TimeoutExpired(
+            cmd=args[0],
+            timeout=kwargs["timeout_s"],
+            stderr=b"torch.compile stalled\n",
+        )
+
+    monkeypatch.setattr(
+        run_eval_module,
+        "_run_subprocess_with_live_stderr",
+        fake_run_with_live_stderr,
+    )
+
+    correctness, performance = (
+        run_eval_module._run_single_shape_torch_compile_subprocess(
+            reference_dir=tmp_path / "reference",
+            artifact_dir=tmp_path / "artifacts",
+            checkpoint_root=tmp_path / "checkpoints",
+            shape_results_dir=tmp_path / "shape-results",
+            shape_id="0",
+            warmup_iters=1,
+            bench_iters=1,
+            shape_wall_timeout_s=12.5,
+        )
+    )
+
+    assert observed_timeout == [12.5]
+    assert correctness.status == "skipped"
+    assert performance.error is not None
+    assert "exceeded 12.5s wall-clock budget" in performance.error
+    assert "torch.compile stalled" in performance.error
 
 
 def test_performance_only_subprocess_timeout_fails_performance_stage(

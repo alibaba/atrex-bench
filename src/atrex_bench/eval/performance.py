@@ -686,6 +686,7 @@ def benchmark_performance(
             error="graph_max_rel_l2 must be non-negative",
         )
 
+    artifact: dict[str, object] | None = None
     try:
         resolved_device = get_device(device)
         if (

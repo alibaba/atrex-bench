@@ -38,6 +38,12 @@ class ClockMonitorError(RuntimeError):
     """Raised when continuous clock telemetry cannot be managed safely."""
 
 
+def _effective_uid() -> int:
+    """Return the POSIX effective uid, or root-equivalent on non-POSIX hosts."""
+    geteuid = getattr(os, "geteuid", None)
+    return int(geteuid()) if geteuid is not None else 0
+
+
 @dataclass(frozen=True)
 class ClockSample:
     """One parsed row from an ``nvidia-smi`` loop query."""
@@ -227,7 +233,7 @@ class NvidiaClockMonitor:
         sample_interval_ms: int,
         trace_path: Path,
         popen: Callable[..., subprocess.Popen[str]] = subprocess.Popen,
-        geteuid: Callable[[], int] = os.geteuid,
+        geteuid: Callable[[], int] | None = None,
         stop_timeout_seconds: float = 2.0,
     ) -> None:
         _validate_policy(
@@ -251,7 +257,7 @@ class NvidiaClockMonitor:
         self._sample_interval_ms = sample_interval_ms
         self._trace_path = trace_path
         self._popen = popen
-        self._geteuid = geteuid
+        self._geteuid = geteuid or _effective_uid
         self._stop_timeout_seconds = float(stop_timeout_seconds)
         self._process: subprocess.Popen[str] | None = None
         self._trace_handle = None

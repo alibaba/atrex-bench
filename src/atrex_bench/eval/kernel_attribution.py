@@ -45,7 +45,6 @@ from statistics import median
 
 from atrex_bench.eval._flydsl_tracker import symbols_from_serialized
 from atrex_bench.eval.performance import (
-    KernelTimingEvent,
     PerformanceSample,
     PerformanceShapeResult,
 )

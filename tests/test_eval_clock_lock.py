@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import signal
 import subprocess
 import threading
@@ -10,6 +11,7 @@ from typing import Any
 
 import pytest
 
+import atrex_bench.eval.clock_lock as clock_lock_module
 from atrex_bench.eval.clock_lock import (
     ClockLockConfig,
     ClockLockError,
@@ -86,6 +88,12 @@ def test_non_root_commands_use_noninteractive_sudo() -> None:
     smi.resolve_device("0")
 
     assert runner.calls[0][0][:3] == ["sudo", "-n", "nvidia-smi"]
+
+
+def test_nvidia_smi_does_not_bind_posix_uid_lookup_at_import_time() -> None:
+    parameter = inspect.signature(NvidiaSmi).parameters["geteuid"]
+
+    assert parameter.default is None
 
 
 @pytest.mark.parametrize(
@@ -543,6 +551,20 @@ def _managed_lock(tmp_path, smi, **kwargs) -> ManagedClockLock:
         lock_directory=tmp_path,
         **kwargs,
     )
+
+
+def test_managed_lock_fails_cleanly_without_posix_file_locking(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    smi = FakeNvidiaSmi(snapshots=successful_snapshots())
+    managed_lock = _managed_lock(tmp_path, smi)
+    monkeypatch.setattr(clock_lock_module, "fcntl", None)
+
+    with pytest.raises(ClockLockError, match="POSIX file locking"):
+        managed_lock._acquire_process_lock(
+            NvidiaDevice("0", "0", "GPU-aabb", "NVIDIA Test GPU")
+        )
 
 
 def test_managed_lock_refuses_a_gpu_this_process_does_not_run_on(tmp_path) -> None:

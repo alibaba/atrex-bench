@@ -8,6 +8,7 @@ The runtime tracker itself is tested in ``test_eval_flydsl_tracker.py``;
 end-to-end coverage of the sub-worker wiring lives in
 ``test_eval_performance.py`` and ``test_run_eval.py``.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -21,7 +22,6 @@ from atrex_bench.eval.performance import (
     PerformanceSample,
     PerformanceShapeResult,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

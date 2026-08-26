@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import math
 import os
 import signal
@@ -13,6 +12,11 @@ from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Literal, Protocol
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - exercised by platform import checks
+    fcntl = None  # type: ignore[assignment]
 
 from .clock_monitor import ClockMeasurement
 from .nvidia_clock import ClockSnapshot, ComputeProcess, NvidiaDevice
@@ -342,6 +346,10 @@ class ManagedClockLock:
     def _acquire_process_lock(self, device: NvidiaDevice) -> None:
         import hashlib
 
+        if fcntl is None:
+            raise ClockLockError(
+                "Managed clock locking requires POSIX file locking support."
+            )
         lock_name = hashlib.sha256(device.uuid.encode("utf-8")).hexdigest()[:24]
         self._lock_directory.mkdir(parents=True, exist_ok=True)
         lock_path = self._lock_directory / f"atrex-bench-clock-{lock_name}.lock"
@@ -358,6 +366,7 @@ class ManagedClockLock:
     def _release_process_lock(self) -> None:
         if self._lock_handle is None:
             return
+        assert fcntl is not None
         fcntl.flock(self._lock_handle.fileno(), fcntl.LOCK_UN)
         self._lock_handle.close()
         self._lock_handle = None

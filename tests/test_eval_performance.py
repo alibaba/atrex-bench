@@ -1,7 +1,7 @@
 """Tests for Stage 2: performance profiling."""
 
-import contextlib
 import builtins
+import contextlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -515,3 +515,27 @@ def test_benchmark_error_handled(tmp_path: Path) -> None:
     assert result.samples == []
     assert result.error is not None
     assert "init failure" in result.error
+
+
+def test_candidate_timeout_before_input_artifact_preserves_timeout_error(
+    monkeypatch,
+) -> None:
+    def timeout_before_inputs(*_args, **_kwargs):
+        raise performance_module.CandidateTimeoutError("candidate timed out during init")
+
+    monkeypatch.setattr(
+        performance_module,
+        "instantiate_model_module",
+        timeout_before_inputs,
+    )
+
+    result = benchmark_performance(
+        CANDIDATE_PATH,
+        REFERENCE_PATH,
+        warmup_iters=1,
+        bench_iters=1,
+        device="cpu",
+    )
+
+    assert result.input_artifact is None
+    assert result.error == "candidate timed out during init"
