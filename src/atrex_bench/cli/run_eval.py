@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import codecs
 import contextlib
 import copy
 import hashlib
 import json
 import os
 import secrets
+import selectors
 import shutil
 import signal
 import subprocess
@@ -91,6 +93,8 @@ _DEFAULT_CANDIDATE_TIMEOUT_S = 60.0
 _DEFAULT_PERF_TIMEOUT_S = 600.0
 _DEFAULT_COMPILE_TIMEOUT_S = 300.0
 _SUBPROCESS_SHUTDOWN_TIMEOUT_S = 5.0
+_SUBPROCESS_TERMINATE_GRACE_S = 1.0
+_PIPE_POLL_INTERVAL_S = 0.05
 _COMPILE_READY_FILENAME = ".compile-ready"
 _COMPILE_READY_POLL_INTERVAL_S = 0.2
 _DEFAULT_BENCHMARK_MODE = "eager"
@@ -684,7 +688,9 @@ def _kill_process_group(process: subprocess.Popen) -> None:
     """
     if os.name == "posix":
         try:
-            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            # start_new_session=True makes pid the PGID. Keep using that ID
+            # even after the leader exits; getpgid(pid) would then fail.
+            os.killpg(process.pid, signal.SIGKILL)
             return
         except OSError:
             pass
@@ -752,13 +758,17 @@ def _run_subprocess_with_live_stderr(
     timeout_s: float | None = None,
     compile_ready_path: Path | None = None,
     compile_timeout_s: float | None = None,
+    terminate_grace_s: float = 0.0,
 ) -> subprocess.CompletedProcess[str]:
     """Run a subprocess while mirroring its stderr to this process in real time.
 
     ``timeout_s`` is an OS-level ceiling; None means wait indefinitely, which is
     what every caller did before there was one. ``compile_timeout_s`` independently
     bounds the interval until ``compile_ready_path`` appears. On either expiry the
-    child's whole process group is SIGKILLed and the timeout exception propagates.
+    child's whole process group is killed and the timeout exception propagates.
+    The same deadline covers pipe EOF, including pipes inherited by descendants.
+    Supervisors may set ``terminate_grace_s`` to allow a cooperative worker to
+    clean up its own separately grouped children before the SIGKILL fallback.
     """
     started_at = time.monotonic()
     process = subprocess.Popen(
@@ -776,29 +786,90 @@ def _run_subprocess_with_live_stderr(
     )
     stdout_chunks: list[str] = []
     stderr_chunks: list[str] = []
+    stop_readers = threading.Event()
 
-    def _drain_stdout() -> None:
-        assert process.stdout is not None
-        try:
-            for line in process.stdout:
-                stdout_chunks.append(line)
-        except (OSError, ValueError):
-            if not process.stdout.closed:
-                raise
-
-    def _drain_stderr() -> None:
-        assert process.stderr is not None
-        try:
-            for line in process.stderr:
-                stderr_chunks.append(line)
-                sys.stderr.write(line)
+    def _drain_stream(stream, chunks: list[str], *, mirror: bool) -> None:
+        def emit(text: str) -> None:
+            if not text:
+                return
+            chunks.append(text)
+            if mirror:
+                sys.stderr.write(text)
                 sys.stderr.flush()
-        except (OSError, ValueError):
-            if not process.stderr.closed:
-                raise
 
-    stdout_thread = threading.Thread(target=_drain_stdout, daemon=True)
-    stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
+        # Nonblocking reads let cleanup stop a reader even when an escaped
+        # descendant still holds a pipe. Never close a buffered stream from
+        # another thread while it might be blocked holding the stream lock.
+        try:
+            fd = stream.fileno() if os.name == "posix" else None
+        except (OSError, ValueError):
+            fd = None
+        try:
+            if fd is None:
+                for line in stream:
+                    emit(line)
+            else:
+                os.set_blocking(fd, False)
+                decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+                with selectors.DefaultSelector() as selector:
+                    selector.register(fd, selectors.EVENT_READ)
+                    while not stop_readers.is_set():
+                        if not selector.select(_PIPE_POLL_INTERVAL_S):
+                            continue
+                        try:
+                            chunk = os.read(fd, 65536)
+                        except BlockingIOError:
+                            continue
+                        if not chunk:
+                            break
+                        emit(decoder.decode(chunk))
+                emit(decoder.decode(b"", final=True))
+        except (OSError, ValueError):
+            if not stop_readers.is_set():
+                raise
+        finally:
+            stream.close()
+
+    stdout_thread = threading.Thread(
+        target=_drain_stream,
+        args=(process.stdout, stdout_chunks),
+        kwargs={"mirror": False},
+        daemon=True,
+    )
+    stderr_thread = threading.Thread(
+        target=_drain_stream,
+        args=(process.stderr, stderr_chunks),
+        kwargs={"mirror": True},
+        daemon=True,
+    )
+    readers = (stdout_thread, stderr_thread)
+
+    def cleanup() -> None:
+        # Give the top-level worker a chance to clean up its separately grouped
+        # shape worker, including on cancellation. Per-shape callers use no
+        # grace period, so the worker kills the compiler group immediately.
+        if terminate_grace_s > 0 and os.name == "posix" and process.poll() is None:
+            try:
+                process.terminate()
+                process.wait(timeout=terminate_grace_s)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        _kill_process_group(process)
+        shutdown_started = time.monotonic()
+        try:
+            process.wait(timeout=_SUBPROCESS_SHUTDOWN_TIMEOUT_S)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        for reader in readers:
+            reader.join(
+                timeout=_remaining_subprocess_timeout(
+                    _SUBPROCESS_SHUTDOWN_TIMEOUT_S, started_at=shutdown_started,
+                )
+            )
+        stop_readers.set()
+        for reader in readers:
+            reader.join(timeout=2 * _PIPE_POLL_INTERVAL_S)
+
     stdout_thread.start()
     stderr_thread.start()
     try:
@@ -815,44 +886,20 @@ def _run_subprocess_with_live_stderr(
                     started_at=started_at,
                 )
             )
+            for reader in readers:
+                reader.join(
+                    timeout=_remaining_subprocess_timeout(timeout_s, started_at=started_at)
+                )
+                if reader.is_alive():
+                    raise subprocess.TimeoutExpired(cmd, timeout_s)
     except (_CompileStageTimeoutExpired, subprocess.TimeoutExpired) as error:
-        _kill_process_group(process)
-        try:
-            process.wait(timeout=_SUBPROCESS_SHUTDOWN_TIMEOUT_S)
-        except (OSError, subprocess.TimeoutExpired):
-            pass
-        for stream in (process.stdout, process.stderr):
-            if stream is not None:
-                stream.close()
-        stdout_thread.join(timeout=_SUBPROCESS_SHUTDOWN_TIMEOUT_S)
-        stderr_thread.join(timeout=_SUBPROCESS_SHUTDOWN_TIMEOUT_S)
+        cleanup()
         error.stdout = "".join(stdout_chunks)
         error.stderr = "".join(stderr_chunks)
         raise
     except BaseException:
-        cleanup_errors: list[str] = []
-        _kill_process_group(process)
-        try:
-            process.wait(timeout=_SUBPROCESS_SHUTDOWN_TIMEOUT_S)
-        except subprocess.TimeoutExpired as error:
-            cleanup_errors.append(f"wait after process-group kill timed out: {error}")
-        except Exception as error:
-            cleanup_errors.append(f"wait after process-group kill failed: {error}")
-
-        for stream in (process.stdout, process.stderr):
-            if stream is not None:
-                stream.close()
-        stdout_thread.join(timeout=_SUBPROCESS_SHUTDOWN_TIMEOUT_S)
-        stderr_thread.join(timeout=_SUBPROCESS_SHUTDOWN_TIMEOUT_S)
-        if stdout_thread.is_alive():
-            cleanup_errors.append("stdout drain thread did not stop after stream close")
-        if stderr_thread.is_alive():
-            cleanup_errors.append("stderr drain thread did not stop after stream close")
-        if cleanup_errors:
-            _log("[worker] interruption cleanup warning: " + "; ".join(cleanup_errors))
+        cleanup()
         raise
-    stdout_thread.join()
-    stderr_thread.join()
 
     return subprocess.CompletedProcess(
         args=cmd,
@@ -1810,6 +1857,12 @@ def _subworker_failure_results(
     )
 
 
+def _shape_result_path(shape_results_dir: Path, shape_id: str) -> Path:
+    """Keep arbitrary user-provided shape IDs out of filesystem path components."""
+    digest = hashlib.sha256(shape_id.encode("utf-8")).hexdigest()
+    return shape_results_dir / f"{digest}.json"
+
+
 def _run_single_shape_subprocess(
     *,
     candidate_path: Path,
@@ -1850,13 +1903,13 @@ def _run_single_shape_subprocess(
     moves on to the next shape; previously, a single fault skipped every
     remaining shape because the worker process itself died.
 
-    ``shape_wall_timeout_s`` is enforced by the OS (subprocess.run's
-    timeout=). On expiry the kernel SIGKILLs the sub-worker, which catches
+    ``shape_wall_timeout_s`` is enforced by the parent. On expiry the whole
+    sub-worker process group is killed, which catches
     pathological hangs that the in-Python ``candidate_timeout`` cannot
     (e.g. flydsl's @kernel AOT compile that blocks inside an MLIR C call,
     or a CUDA/HIP kernel that wedges torch.cuda.synchronize).
     """
-    shape_result_path = shape_results_dir / f"{shape_id}.json"
+    shape_result_path = _shape_result_path(shape_results_dir, shape_id)
     if shape_result_path.exists():
         shape_result_path.unlink()
 
@@ -1892,15 +1945,10 @@ def _run_single_shape_subprocess(
     )
 
     try:
-        completed = subprocess.run(
+        completed = _run_subprocess_with_live_stderr(
             cmd,
             cwd=str(Path(__file__).resolve().parents[1]),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-            timeout=shape_wall_timeout_s,
+            timeout_s=shape_wall_timeout_s,
         )
     except subprocess.TimeoutExpired as exc:
         # OS killed the sub-worker after exceeding the wall budget.
@@ -2173,7 +2221,7 @@ def _run_single_shape_torch_compile_subprocess(
     shape_wall_timeout_s: float,
 ) -> tuple[CorrectnessShapeResult, PerformanceShapeResult]:
     """Spawn one subprocess to benchmark torch.compile(reference) for one shape."""
-    shape_result_path = shape_results_dir / f"{shape_id}.json"
+    shape_result_path = _shape_result_path(shape_results_dir, shape_id)
     if shape_result_path.exists():
         shape_result_path.unlink()
 
@@ -2821,6 +2869,8 @@ def _run_torch_compile_eval_process(
     perf_timeout_s: int | float = _DEFAULT_PERF_TIMEOUT_S,
 ) -> dict[str, object]:
     """Benchmark torch.compile(reference) across all shapes."""
+    reference_dir = reference_dir.resolve()
+    output_root = output_root.resolve()
     resolved_timestamp = get_timestamp(timestamp)
     kernel_name = _kernel_name(reference_dir, reference_dir / "reference.py")
     artifact_dir, eval_output_path = _build_artifact_paths(
@@ -2908,6 +2958,7 @@ def _run_torch_compile_eval_process(
             worker_command,
             cwd=str(Path(__file__).resolve().parents[1]),
             env=worker_environment,
+            terminate_grace_s=_SUBPROCESS_TERMINATE_GRACE_S,
         )
     except Exception:
         failure_payload = _annotate_failure_payload(
@@ -2970,6 +3021,9 @@ def _run_eval_process(
     validation_mode: str = _VALIDATION_MODE_FULL,
 ) -> dict[str, object]:
     """Run the full pipeline; always persist a valid eval_result.json."""
+    input_path = input_path.resolve()
+    reference_dir = reference_dir.resolve()
+    output_root = output_root.resolve()
     resolved_timestamp = get_timestamp(timestamp)
     kernel_name = _kernel_name(reference_dir, input_path)
     artifact_dir, eval_output_path = _build_artifact_paths(
@@ -3103,6 +3157,7 @@ def _run_eval_process(
             cwd=str(Path(__file__).resolve().parents[1]),
             env=worker_environment,
             timeout_s=worker_wall_timeout_s,
+            terminate_grace_s=_SUBPROCESS_TERMINATE_GRACE_S,
             compile_ready_path=compile_ready_path,
             compile_timeout_s=float(compile_timeout_s),
         )
@@ -3333,6 +3388,8 @@ def run_torch_compile_eval(
     perf_timeout_s: int | float = _DEFAULT_PERF_TIMEOUT_S,
 ) -> dict[str, object]:
     """Run torch.compile evaluation under one optional parent clock lock."""
+    reference_dir = reference_dir.resolve()
+    output_root = output_root.resolve()
     resolved_timestamp = get_timestamp(timestamp)
     resolved_clock_config = _public_clock_lock_config(
         clock_lock_config,
@@ -3425,6 +3482,9 @@ def run_eval(
     validation_mode: str = _VALIDATION_MODE_FULL,
 ) -> dict[str, object]:
     """Run candidate evaluation under one optional parent clock lock."""
+    input_path = input_path.resolve()
+    reference_dir = reference_dir.resolve()
+    output_root = output_root.resolve()
     validation_mode = _resolve_validation_mode(validation_mode, {})
     resolved_timestamp = get_timestamp(timestamp)
     resolved_clock_config = _public_clock_lock_config(
@@ -3687,7 +3747,10 @@ def main() -> None:
         "--checkpoint-dir",
         type=Path,
         default=None,
-        help="Relative or absolute root directory for correctness/performance checkpoints",
+        help=(
+            "Checkpoint root; relative paths are based on this run's artifact "
+            "directory (output/<timestamp>/<kernel>), not the caller's cwd"
+        ),
     )
     parser.add_argument(
         "--config-version",

@@ -176,6 +176,30 @@ def test_ratio_pure_flydsl_via_func_pattern(tmp_path: Path) -> None:
     assert result.kernel_breakdown[0].is_flydsl is True
 
 
+def test_ratio_keeps_all_launches_of_the_same_kernel_per_forward(tmp_path: Path) -> None:
+    perf = _perf(
+        [KernelTimingEvent("my_op", 100.0, 2)],
+        observed_kernels={"exact_names": ["my_op"], "func_names": []},
+        e2e_ms=0.1,
+    )
+    result = compute_flydsl_compute_ratio_for_shape(_candidate(tmp_path), perf, dsl="flydsl")
+    assert result.ratio == 1.0
+    assert result.flydsl_device_time_us == 100.0
+    assert result.kernel_breakdown[0].device_time_us == 100.0
+    assert result.kernel_breakdown[0].calls == 2
+
+
+def test_ratio_mixed_kernels_keeps_per_forward_totals(tmp_path: Path) -> None:
+    perf = _perf(
+        [KernelTimingEvent("my_op", 60.0, 3), KernelTimingEvent("torch_op", 40.0, 2)],
+        observed_kernels={"exact_names": ["my_op"], "func_names": []},
+        e2e_ms=0.1,
+    )
+    result = compute_flydsl_compute_ratio_for_shape(_candidate(tmp_path), perf, dsl="flydsl")
+    assert result.ratio == 0.6
+    assert [event.device_time_us for event in result.kernel_breakdown] == [60.0, 40.0]
+
+
 def test_ratio_mixed_flydsl_and_torch(tmp_path: Path) -> None:
     """Mixed events. Total kernel device time 6000us across a 10000us e2e
     wall (10ms) -> flydsl ratio 2000/10000 = 0.2 (NOT 2000/6000 -- the

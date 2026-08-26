@@ -86,6 +86,32 @@ def test_evaluate_keeps_relative_checkpoint_semantics(
     assert evaluate(config) is expected
 
 
+@pytest.mark.parametrize("eval_mode", ["candidate", "torch_compile_reference"])
+def test_evaluate_resolves_launch_paths_before_starting_worker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, eval_mode: str,
+) -> None:
+    from atrex_bench import evaluate, sdk
+
+    config = _valid_sdk_config(tmp_path)
+    config.update(
+        eval_mode=eval_mode, input="candidate.py", reference_dir="reference",
+        output="artifacts", checkpoint_dir="checkpoints",
+    )
+    if eval_mode == "torch_compile_reference":
+        config.pop("input")
+    original = dict(config)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sdk, "_run_evaluation_process", lambda normalized: normalized)
+
+    normalized = evaluate(config)
+
+    assert config == original
+    for key in ("input", "reference_dir", "output"):
+        if key in config:
+            assert normalized[key] == str((tmp_path / config[key]).resolve())
+    assert normalized["checkpoint_dir"] == "checkpoints"
+
+
 def test_evaluate_rejects_unwritable_output_parent(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

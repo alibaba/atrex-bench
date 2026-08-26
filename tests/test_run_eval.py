@@ -3081,6 +3081,7 @@ def test_run_eval_reports_compile_timeout_before_worker_total_timeout(
     assert str(result["error"]).startswith("Compile stage exceeded 0.1s")
 
 
+@pytest.mark.skipif(os.name != "posix", reason="requires POSIX process groups")
 def test_worker_timeout_kills_the_process_group_not_just_the_child(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3092,8 +3093,14 @@ def test_worker_timeout_kills_the_process_group_not_just_the_child(
     from scripts import run_eval as run_eval_module
 
     killed: list[int] = []
+    real_killpg = os.killpg
+
+    def record_killpg(pgid, sig):
+        killed.append(pgid)
+        real_killpg(pgid, sig)
+
     monkeypatch.setattr(
-        run_eval_module.os, "killpg", lambda pgid, _sig: killed.append(pgid)
+        run_eval_module.os, "killpg", record_killpg
     )
     monkeypatch.setattr(run_eval_module.os, "getpgid", lambda pid: pid)
 
@@ -3179,7 +3186,7 @@ def test_single_shape_subprocess_synthesizes_failed_on_wall_timeout(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When the per-shape sub-worker exceeds the wall budget, subprocess.run
+    """When the per-shape sub-worker exceeds the wall budget, the process runner
     raises ``TimeoutExpired``; we must catch it and synthesize a
     ``status='failed'`` ``CorrectnessShapeResult`` instead of crashing.
     """
@@ -3190,12 +3197,12 @@ def test_single_shape_subprocess_synthesizes_failed_on_wall_timeout(
     def fake_subprocess_run(*args, **kwargs):
         raise subprocess.TimeoutExpired(
             cmd=args[0] if args else kwargs.get("args", ["fake"]),
-            timeout=kwargs.get("timeout", 180.0),
+            timeout=kwargs.get("timeout_s", 180.0),
             output=b"",
             stderr=b"line1\nline2\nline3 simulated trace\n",
         )
 
-    monkeypatch.setattr(run_eval_module.subprocess, "run", fake_subprocess_run)
+    monkeypatch.setattr(run_eval_module, "_run_subprocess_with_live_stderr", fake_subprocess_run)
 
     shape_results_dir = tmp_path / ".shape_results"
     shape_results_dir.mkdir()
@@ -3281,12 +3288,12 @@ def test_performance_only_subprocess_timeout_fails_performance_stage(
     from scripts import run_eval as run_eval_module
 
     monkeypatch.setattr(
-        run_eval_module.subprocess,
-        "run",
+        run_eval_module,
+        "_run_subprocess_with_live_stderr",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             subprocess.TimeoutExpired(
                 cmd=args[0] if args else kwargs.get("args", ["fake"]),
-                timeout=kwargs.get("timeout", 180.0),
+                timeout=kwargs.get("timeout_s", 180.0),
             )
         ),
     )

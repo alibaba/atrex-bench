@@ -10,6 +10,13 @@ python scripts/run_eval.py --config /abs/path/run_eval.json
 
 Existing public CLI options remain supported. Explicit CLI options take precedence over the config. Absolute paths are recommended for all path fields.
 
+For both CLI and SDK calls, relative `input`, `reference_dir`, and `output` paths
+are resolved against the caller's working directory before starting workers
+(not against the config file or package directory). A relative `checkpoint_dir`
+is instead based on the current run's artifact directory:
+`<output>/<timestamp>/<kernel>/`. If omitted, that artifact directory is also the
+checkpoint root. Absolute checkpoint paths are used as supplied.
+
 Python callers can use `atrex_bench.evaluate(config)`. The SDK accepts the same fields as
 `--config`, runs the evaluator in a separate subprocess, and returns the complete
 `eval_result.json` object. Normal compile, correctness, or performance stage failures
@@ -63,6 +70,13 @@ Constraints:
 | `--trust-mode` | enum | `trusted` | Allowed values: `trusted`, `untrusted`. |
 | `--skip-kernel-attribution` | bool flag | `false` | Skips kernel attribution and `flydsl_compute_ratio`. |
 
+On POSIX, each worker runs in its own process group. Timeout handling kills the
+whole group, including compiler descendants; the deadline also covers inherited
+stdout/stderr pipes after the worker exits. A supervising worker gets up to one
+second to clean up its separately grouped shape worker before SIGKILL, followed
+by bounded process/pipe cleanup. This is not a sandbox: descendants that explicitly
+detach into another session are outside the original process group.
+
 ## 5. Advanced Performance Options
 
 | Option | Type | Default | Applies when |
@@ -73,6 +87,12 @@ Constraints:
 | `--graph-rtol` | float | `0.05` | `benchmark-mode=cuda_graph_replay`. |
 | `--graph-min-cosine` | float | Unset | `benchmark-mode=cuda_graph_replay`. When set, replaces floating-point allclose checks. |
 | `--graph-max-rel-l2` | float | Unset | `benchmark-mode=cuda_graph_replay`. |
+
+Unless `--skip-kernel-attribution` is set, CUDA Graph mode profiles a separate
+loop of replays of the captured graph. Capture, eager warmup, and cache flushing
+are excluded from this loop, and profiler overhead does not affect the recorded
+end-to-end samples. Kernel times are summed across all launches of each symbol
+per forward (or graph replay), not averaged per kernel launch.
 
 ## 6. GPU Clock-Locking Options
 

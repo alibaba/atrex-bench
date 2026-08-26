@@ -193,13 +193,12 @@ def compute_flydsl_compute_ratio_for_shape(
 
     exact_names, func_patterns = runtime_symbols
 
-    # Denominator: per-forward end-to-end wall time from do_bench (the only
-    # accurate timing source). Numerator: per-forward sum of flydsl kernels'
+    # Denominator: independently measured per-forward end-to-end time (eager
+    # do_bench or CUDA Graph events). Numerator: per-forward sum of flydsl kernels'
     # device time. Note: kernel_events.device_time_us is normalised to
-    # per-ITERATION totals in _measure_runner_samples (divided by
-    # _PROFILER_BREAKDOWN_ITERS), NOT per-call. When a kernel fires multiple
-    # times per forward (e.g. CUDA graph replay), we must further divide by
-    # calls to get per-forward time comparable to the e2e denominator.
+    # per-forward totals by the profiler loop. Multiple launches of the same
+    # kernel within one forward all contribute; calls is diagnostic metadata,
+    # not another normalization factor.
     # Ratio thus = "fraction of candidate wall time spent inside flydsl
     # @kernel GPU work", which is the reward-hacking signal we care about.
     e2e_ms = _representative_e2e_ms(performance_result.samples)
@@ -212,28 +211,18 @@ def compute_flydsl_compute_ratio_for_shape(
 
     breakdown: list[KernelAttribution] = []
     flydsl_time = 0.0
-    total_kernel_time = 0.0
     for event in performance_result.kernel_events:
         is_flydsl = _is_flydsl_event(event.name, exact_names, func_patterns)
-        # device_time_us is the total across all `calls` invocations per
-        # profiler iteration.  Normalise to per-call (= per-forward) time so
-        # the sum is comparable to the single-forward e2e wall time from
-        # do_bench.  Without this, candidates that use CUDA graphs (which
-        # cause kernels to fire twice per profiler span — once in the real
-        # execution and once in graph.replay()) inflate the numerator by
-        # the replay factor.
-        per_call_time = event.device_time_us / max(1, event.calls)
         breakdown.append(
             KernelAttribution(
                 name=event.name,
-                device_time_us=per_call_time,
+                device_time_us=event.device_time_us,
                 calls=event.calls,
                 is_flydsl=is_flydsl,
             )
         )
-        total_kernel_time += per_call_time
         if is_flydsl:
-            flydsl_time += per_call_time
+            flydsl_time += event.device_time_us
 
     breakdown.sort(key=lambda k: -k.device_time_us)
 

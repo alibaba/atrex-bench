@@ -472,6 +472,18 @@ def _compare_graph_outputs(
     }
 
 
+def _per_forward_kernel_events(prof) -> list[KernelTimingEvent]:
+    """Normalize profiler totals once, retaining all launches within a forward."""
+    return [
+        KernelTimingEvent(
+            name=event.name,
+            device_time_us=event.device_time_us / _PROFILER_BREAKDOWN_ITERS,
+            calls=max(1, round(event.calls / _PROFILER_BREAKDOWN_ITERS)),
+        )
+        for event in _aggregate_kernel_events(prof)
+    ]
+
+
 def _measure_cuda_graph_samples(
     *,
     bench_fn,
@@ -483,6 +495,7 @@ def _measure_cuda_graph_samples(
     rtol: float,
     min_cosine: float | None = None,
     max_rel_l2: float | None = None,
+    collect_kernel_events: bool = False,
 ) -> _MeasurementResult:
     eager_output = None
     for _ in range(max(1, warmup_iters)):
@@ -531,8 +544,28 @@ def _measure_cuda_graph_samples(
             f"{graph_correctness}"
         )
 
+    kernel_events = []
+    if collect_kernel_events:
+        # Profile only replays of the already captured graph, separately from
+        # the timed samples. Capture, eager warmup and cache-flush kernels must
+        # not contribute to the per-forward attribution numerator.
+        with profile(
+            activities=_profile_activities(device),
+            schedule=_build_profiler_schedule(0, _PROFILER_BREAKDOWN_ITERS),
+            acc_events=True,
+        ) as prof:
+            for _ in range(_PROFILER_BREAKDOWN_ITERS):
+                sync_device(device)
+                with record_function(_MODEL_FORWARD_LABEL):
+                    graph.replay()
+                    sync_device(device)
+                if prof is not None:
+                    prof.step()
+        kernel_events = _per_forward_kernel_events(prof)
+
     return _MeasurementResult(
         samples=samples,
+        kernel_events=kernel_events,
         capture_time_ms=capture_time_ms,
         graph_correctness=graph_correctness,
     )
@@ -589,6 +622,7 @@ def _measure_runner_samples(
                 rtol=rtol,
                 min_cosine=min_cosine,
                 max_rel_l2=max_rel_l2,
+                collect_kernel_events=collect_kernel_events,
             )
 
         measurement = _measure_eager_samples(
@@ -619,20 +653,9 @@ def _measure_runner_samples(
                 if prof is not None:
                     prof.step()
 
-        raw_kernel_events = _aggregate_kernel_events(prof)
-        # Normalise to per-forward averages so consumers can compare
-        # against the per-forward end_to_end_time_ms from do_bench.
-        kernel_events = [
-            KernelTimingEvent(
-                name=ev.name,
-                device_time_us=ev.device_time_us / _PROFILER_BREAKDOWN_ITERS,
-                calls=max(1, round(ev.calls / _PROFILER_BREAKDOWN_ITERS)),
-            )
-            for ev in raw_kernel_events
-        ]
         return _MeasurementResult(
             samples=measurement.samples,
-            kernel_events=kernel_events,
+            kernel_events=_per_forward_kernel_events(prof),
         )
 
 

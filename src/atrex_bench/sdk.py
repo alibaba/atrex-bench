@@ -73,7 +73,9 @@ def _normalize_config(config: Mapping[str, object]) -> dict[str, object]:
             raise AtrexConfigError(
                 f"{name} must be a non-empty path string or null"
             )
-        normalized[name] = value
+        # Launch paths belong to the caller's cwd, not a worker's package cwd.
+        # Relative checkpoints deliberately remain relative to the run artifact.
+        normalized[name] = value if name == "checkpoint_dir" else str(Path(value).resolve())
 
     try:
         json.dumps(normalized, allow_nan=False)

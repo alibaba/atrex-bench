@@ -5,6 +5,7 @@ import contextlib
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 import torch
 
 from atrex_bench.eval import performance as performance_module
@@ -69,7 +70,8 @@ def test_unknown_benchmark_mode_is_rejected() -> None:
     assert "unsupported benchmark_mode" in result.error
 
 
-def test_measure_runner_dispatches_cuda_graph_mode(monkeypatch) -> None:
+@pytest.mark.parametrize("collect_kernel_events", [False, True])
+def test_measure_runner_dispatches_cuda_graph_mode(monkeypatch, collect_kernel_events) -> None:
     calls: list[str] = []
     expected = performance_module._MeasurementResult(
         samples=[PerformanceSample(end_to_end_time_ms=1.25)],
@@ -80,11 +82,12 @@ def test_measure_runner_dispatches_cuda_graph_mode(monkeypatch) -> None:
         "_measure_eager_samples",
         lambda **_kwargs: calls.append("eager"),
     )
-    monkeypatch.setattr(
-        performance_module,
-        "_measure_cuda_graph_samples",
-        lambda **_kwargs: calls.append("cuda_graph_replay") or expected,
-    )
+    def fake_cuda_graph(**kwargs):
+        assert kwargs["collect_kernel_events"] is collect_kernel_events
+        calls.append("cuda_graph_replay")
+        return expected
+
+    monkeypatch.setattr(performance_module, "_measure_cuda_graph_samples", fake_cuda_graph)
     monkeypatch.setattr(
         performance_module,
         "clone_model_inputs",
@@ -98,6 +101,7 @@ def test_measure_runner_dispatches_cuda_graph_mode(monkeypatch) -> None:
         warmup_iters=1,
         bench_iters=2,
         benchmark_mode="cuda_graph_replay",
+        collect_kernel_events=collect_kernel_events,
     )
 
     assert result is expected
@@ -211,27 +215,75 @@ def test_forward_nvtx_survives_a_missing_nvtx_backend(monkeypatch) -> None:
         pass
 
 
-def test_cuda_graph_measurement_captures_once_and_replays(monkeypatch) -> None:
+@pytest.mark.parametrize("collect_kernel_events", [False, True])
+def test_cuda_graph_measurement_captures_once_and_replays(
+    monkeypatch, collect_kernel_events: bool,
+) -> None:
     calls = {"forward": 0, "replay": 0, "flush": 0}
+    profiling = False
+    profiled_replays = 0
+    profiler_steps = 0
+    forward_markers = 0
+
+    class FakeProfiler:
+        def step(self):
+            nonlocal profiler_steps
+            profiler_steps += 1
+
+        def events(self):
+            return [
+                SimpleNamespace(
+                    name="my_op", device_type="DeviceType.CUDA", self_device_time_total=50.0,
+                )
+                for _ in range(2 * profiled_replays)
+            ]
+
+    @contextlib.contextmanager
+    def fake_profile(**kwargs):
+        nonlocal profiling
+        assert collect_kernel_events
+        assert kwargs["acc_events"] is True
+        assert calls == {"forward": 3, "replay": 5, "flush": 5}
+        profiling = True
+        yield FakeProfiler()
+        profiling = False
+
+    @contextlib.contextmanager
+    def fake_record_function(label):
+        nonlocal forward_markers
+        assert label == performance_module._MODEL_FORWARD_LABEL
+        assert profiling
+        forward_markers += 1
+        yield
 
     class FakeGraph:
         def replay(self) -> None:
+            nonlocal profiled_replays
             calls["replay"] += 1
+            if profiling:
+                profiled_replays += 1
 
     class FakeEvent:
         def __init__(self, *, enable_timing: bool):
             assert enable_timing is True
 
         def record(self) -> None:
-            pass
+            assert not profiling, "profiler must not contaminate timed samples"
 
         def elapsed_time(self, _other) -> float:
             return 0.5
 
     def bench_fn():
+        assert not profiling, "profile graph replay, not eager forward or capture"
         calls["forward"] += 1
         return torch.ones(2)
 
+    def flush_cache(_size, _device):
+        assert not profiling, "cache flushing must not contribute to attribution"
+        calls["flush"] += 1
+
+    monkeypatch.setattr(performance_module, "profile", fake_profile)
+    monkeypatch.setattr(performance_module, "record_function", fake_record_function)
     monkeypatch.setattr(torch.cuda, "CUDAGraph", FakeGraph)
     monkeypatch.setattr(
         torch.cuda,
@@ -243,7 +295,7 @@ def test_cuda_graph_measurement_captures_once_and_replays(monkeypatch) -> None:
     monkeypatch.setattr(
         performance_module,
         "_flush_cuda_cache",
-        lambda _size, _device: calls.__setitem__("flush", calls["flush"] + 1),
+        flush_cache,
     )
 
     result = performance_module._measure_cuda_graph_samples(
@@ -254,13 +306,21 @@ def test_cuda_graph_measurement_captures_once_and_replays(monkeypatch) -> None:
         cache_flush_mb=1024,
         atol=1e-2,
         rtol=0.05,
+        collect_kernel_events=collect_kernel_events,
     )
 
+    breakdown_iters = performance_module._PROFILER_BREAKDOWN_ITERS if collect_kernel_events else 0
     assert calls == {
         "forward": 3,
-        "replay": 5,
+        "replay": 5 + breakdown_iters,
         "flush": 5,
     }
+    assert profiled_replays == profiler_steps == forward_markers == breakdown_iters
+    assert result.capture_time_ms is not None
+    if collect_kernel_events:
+        assert result.kernel_events == [performance_module.KernelTimingEvent("my_op", 100.0, 2)]
+    else:
+        assert result.kernel_events == []
     assert [sample.end_to_end_time_ms for sample in result.samples] == [
         0.5,
         0.5,
@@ -307,6 +367,27 @@ def test_cuda_graph_cosine_policy_accepts_atomic_variation() -> None:
     assert cosine["outputs"][0]["cosine_similarity"] >= 0.999
     assert cosine["outputs"][0]["relative_l2"] <= 0.01
     assert cosine["outputs"][0]["max_elementwise_abs_diff"] == 1.0
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA/HIP GPU")
+def test_cuda_graph_replay_collects_real_device_events() -> None:
+    from atrex_bench.eval._runtime import ModelInputs
+
+    class TwoLaunches(torch.nn.Module):
+        def forward(self, value):
+            return torch.sin(torch.sin(value))
+
+    result = performance_module._measure_runner_samples(
+        TwoLaunches(), ModelInputs(args=(torch.ones(4096, device="cuda"),), kwargs={}),
+        torch.device("cuda"), warmup_iters=2, bench_iters=3,
+        benchmark_mode="cuda_graph_replay", cache_flush_mb=0, collect_kernel_events=True,
+    )
+    assert len(result.samples) == 3
+    assert result.graph_correctness["passed"] is True
+    assert result.capture_time_ms is not None
+    assert result.kernel_events
+    assert sum(event.calls for event in result.kernel_events) >= 2
+    assert all(event.device_time_us > 0 for event in result.kernel_events)
 
 
 def test_cuda_graph_cosine_policy_rejects_scale_drift() -> None:
