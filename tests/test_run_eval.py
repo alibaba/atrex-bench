@@ -2,6 +2,7 @@
 
 import io
 import json
+import math
 import os
 import re
 import shutil
@@ -128,10 +129,13 @@ def test_run_eval_single_problem(tmp_path: Path) -> None:
     assert cases[0]["outputs"][0]["name"] == "out"
 
     samples = result["performance"]["shapes"]["0"]["samples"]
-    # do_bench returns one aggregated end-to-end timing per shape (not one
-    # per bench iter -- that was the pre-do_bench perf_counter loop's shape).
-    assert len(samples) == 1
-    assert samples[0]["end_to_end_time_ms"] > 0
+    # Modern do_bench returns individual timings; older versions and the
+    # fallback may return a single aggregate. Both must contain valid samples.
+    assert samples
+    assert all(
+        math.isfinite(sample["end_to_end_time_ms"]) and sample["end_to_end_time_ms"] > 0
+        for sample in samples
+    )
     assert "input_artifact" in result["performance"]["shapes"]["0"]
 
     assert result["error"] is None
@@ -177,6 +181,47 @@ def test_run_eval_single_problem(tmp_path: Path) -> None:
     )
     assert manifest["runner_config"]["warmup_iters"] == 2
     assert manifest["worker_command"]
+
+
+@pytest.mark.skipif(not _gpu_available, reason="requires CUDA/HIP GPU")
+@pytest.mark.parametrize("benchmark_mode", ["eager", "cuda_graph_replay"])
+def test_sdk_collects_device_events_in_fresh_workers(tmp_path, monkeypatch, benchmark_mode) -> None:
+    from atrex_bench import evaluate
+
+    _build_reference_dir(tmp_path, name="reference")
+    shutil.copy2(CANDIDATE_PATH, tmp_path / "candidate.py")
+    monkeypatch.chdir(tmp_path)
+    result = evaluate({
+        "input": "candidate.py",
+        "reference_dir": "reference",
+        "output": "artifacts",
+        "checkpoint_dir": "checkpoints",
+        "benchmark_mode": benchmark_mode,
+        "warmup_iters": 2,
+        "bench_iters": 3,
+        "cuda_graph_cache_flush_mb": 0,
+        "validation_mode": "full",
+    })
+
+    assert result["error"] is None, result["error"]
+    for stage in ("compile", "correctness", "performance"):
+        assert result["passed"][stage]["0"]["status"] == "passed", result["passed"]
+    shape = result["performance"]["shapes"]["0"]
+    assert shape["samples"]
+    assert all(
+        math.isfinite(sample["end_to_end_time_ms"]) and sample["end_to_end_time_ms"] > 0
+        for sample in shape["samples"]
+    )
+    assert shape["kernel_events"], shape
+    assert all(
+        event["calls"] > 0
+        and math.isfinite(event["device_time_us"]) and event["device_time_us"] > 0
+        for event in shape["kernel_events"]
+    )
+    if benchmark_mode == "cuda_graph_replay":
+        assert len(shape["samples"]) == 3
+        assert shape["graph_correctness"]["passed"] is True
+    assert len(list((tmp_path / "artifacts").rglob("eval_result.json"))) == 1
 
 
 def test_torch_compile_worker_writes_shape_major_performance(

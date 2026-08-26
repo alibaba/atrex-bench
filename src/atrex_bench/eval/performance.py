@@ -157,6 +157,22 @@ def _profile_activities(device: torch.device) -> list[ProfilerActivity]:
     return activities
 
 
+def _warmup_device_profiler(device: torch.device) -> None:
+    """Initialize device tracing in a disposable context before attribution.
+
+    Some GPU runtimes emit only CPU records in the process's first profiler
+    context. Finish a separate trace with a small harness kernel before opening
+    the real trace. Do not run the candidate or credit this work to its timing.
+    Callers keep this initialization inside the performance timeout budget.
+    """
+    if device.type != "cuda":
+        return
+    scratch = torch.zeros(1, device=device)
+    with profile(activities=_profile_activities(device)):
+        scratch.add_(1)
+        sync_device(device)
+
+
 def _build_profiler_schedule(warmup_iters: int, bench_iters: int):
     """Build the profiler schedule and suppress the no-warmup warning for warmup=0."""
     with warnings.catch_warnings():
@@ -546,6 +562,7 @@ def _measure_cuda_graph_samples(
 
     kernel_events = []
     if collect_kernel_events:
+        _warmup_device_profiler(device)
         # Profile only replays of the already captured graph, separately from
         # the timed samples. Capture, eager warmup and cache-flush kernels must
         # not contribute to the per-forward attribution numerator.
@@ -635,6 +652,7 @@ def _measure_runner_samples(
         if not collect_kernel_events:
             return measurement
 
+        _warmup_device_profiler(device)
         # Profiler loop for kernel breakdown only. Already warm from
         # do_bench, no extra warmup. Per-iter wall is intentionally
         # NOT used for end_to_end_time_ms (do_bench is the source).
