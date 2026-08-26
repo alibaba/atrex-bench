@@ -154,6 +154,8 @@ def infer_target_dsl(generated_path: Path) -> str:
     matched_dsls = [dsl for dsl, score in scores.items() if score > 0]
     if len(matched_dsls) == 1:
         return matched_dsls[0]
+    if "flydsl" in matched_dsls:
+        return "flydsl"
     return "unknown"
 
 
@@ -245,7 +247,7 @@ def validate_reference_module(module: ModuleType) -> None:
 def validate_input_module(module: ModuleType) -> None:
     """Validate the input.py contract: callable ``_make_inputs``.
 
-    The legacy get_inputs / get_init_inputs wrappers were removed.
+    The legacy get_inputs / get_init_inputs wrappers were removed in F-042.
     Consumers now source init/call kwargs from shapes.json and drive
     ``_make_inputs(**input_kwargs)`` directly. Synthetic inline test
     references that still ship get_inputs/get_init_inputs go through the
@@ -293,7 +295,7 @@ def load_shape_call_inputs(
 def _shape_description_from_metadata(op_dir: Path, shape_id: str) -> str:
     """Read a shape's description from metadata.json (not agent-visible).
 
-    Per the data schema spec, ``description`` and provenance live in
+    Per docs/data_schema.md, ``description`` and provenance live in
     ``metadata.json.shapes[shape_id]`` (kept out of the agent-visible
     ``shapes.json``). The eval/report side runs in the repo, where metadata.json
     is available, so the per-shape label is recovered here. Returns "" if absent.
@@ -437,6 +439,24 @@ def move_to_device(value: Any, device: torch.device) -> Any:
     return value
 
 
+def _has_non_overlapping_strides(tensor: torch.Tensor) -> bool:
+    """Return whether positive strides prove that tensor elements cannot alias."""
+    if tensor.numel() == 0:
+        return True
+
+    dimensions = sorted(
+        (stride, size)
+        for size, stride in zip(tensor.shape, tensor.stride())
+        if size > 1
+    )
+    required_span = 1
+    for stride, size in dimensions:
+        if stride < required_span:
+            return False
+        required_span += (size - 1) * stride
+    return True
+
+
 def clone_value(value: Any) -> Any:
     """Recursively clone tensors while preserving the overall structure."""
     if isinstance(value, ModelInputs):
@@ -445,7 +465,22 @@ def clone_value(value: Any) -> Any:
             kwargs=clone_value(value.kwargs),
         )
     if isinstance(value, torch.Tensor):
-        return value.detach().clone()
+        detached = value.detach()
+        if (
+            detached.layout == torch.strided
+            and not detached.is_quantized
+            and not detached.is_nested
+        ):
+            if not _has_non_overlapping_strides(detached):
+                return detached.clone()
+            clone = torch.empty_strided(
+                tuple(detached.shape),
+                tuple(detached.stride()),
+                dtype=detached.dtype,
+                device=detached.device,
+            )
+            return clone.copy_(detached)
+        return detached.clone()
     if isinstance(value, list):
         return [clone_value(item) for item in value]
     if isinstance(value, tuple):
@@ -717,7 +752,7 @@ def instantiate_model_pair(
 
     Auto-selects between two paths:
 
-    * **New schema** (the data schema spec, Section 3): when a sibling ``shapes.json``
+    * **New schema** (docs/data_schema.md §3): when a sibling ``shapes.json``
       exists, loads init_kwargs from it. Pass ``shape_id`` to pick a specific
       entry; defaults to ``"0"`` (the first shape).
     * **Legacy fallback**: when ``shapes.json`` is missing, reads init inputs
