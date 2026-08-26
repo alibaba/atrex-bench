@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -20,11 +21,16 @@ from atrex_bench.eval._runtime import (
     load_shape_spec,
     seed_all_input_rngs,
     sync_device,
-    write_input_artifact,  # kept import for backward compat; unused here
+    write_input_artifact,  # noqa: F401 - backward-compatible module export
 )
 from atrex_bench.eval._timeout import CandidateTimeoutError, candidate_timeout
+from atrex_bench.eval.reward_hack import (
+    RewardHackDetected,
+    check_plain_tensor_outputs,
+)
 
 _DEFAULT_CANDIDATE_TIMEOUT_S = 60
+CORRECTNESS_MAX_REL_L2_ENV = "ATREX_CORRECTNESS_MAX_REL_L2"
 
 
 @dataclass(frozen=True)
@@ -42,6 +48,7 @@ class OutputDiff:
     passed: bool
     max_elementwise_abs_diff: float | None = None
     max_elementwise_rel_diff: float | None = None
+    relative_l2: float | None = None
     error: str | None = None
 
 
@@ -178,6 +185,19 @@ def _flatten_output_name(prefix_path: str) -> str:
     return prefix_path
 
 
+def configured_max_rel_l2(explicit: float | None = None) -> float | None:
+    if explicit is not None:
+        value = float(explicit)
+    else:
+        raw = os.environ.get(CORRECTNESS_MAX_REL_L2_ENV)
+        if raw is None or not raw.strip():
+            return None
+        value = float(raw)
+    if value < 0:
+        raise ValueError("correctness max_rel_l2 must be non-negative")
+    return value
+
+
 def _compare_output_tensors(
     reference_tensor: torch.Tensor,
     candidate_tensor: torch.Tensor,
@@ -185,6 +205,7 @@ def _compare_output_tensors(
     name: str,
     atol: float,
     rtol: float,
+    max_rel_l2: float | None = None,
 ) -> OutputDiff:
     """Compare a pair of output tensors and return the per-output diff record."""
     if reference_tensor.shape != candidate_tensor.shape:
@@ -198,26 +219,66 @@ def _compare_output_tensors(
             ),
         )
 
+    error: str | None = None
     if torch.is_floating_point(reference_tensor) or torch.is_floating_point(candidate_tensor):
         reference_float = reference_tensor.detach().to(torch.float64)
         candidate_float = candidate_tensor.detach().to(torch.float64)
+        ref_is_finite = bool(torch.isfinite(reference_float).all().item())
+        cand_is_finite = bool(torch.isfinite(candidate_float).all().item())
+        if not ref_is_finite or not cand_is_finite:
+            return OutputDiff(
+                name=name,
+                passed=False,
+                max_elementwise_abs_diff=0.0,
+                max_elementwise_rel_diff=0.0,
+                relative_l2=0.0,
+                error=(
+                    "Non-finite output detected: "
+                    f"reference_finite={ref_is_finite}, candidate_finite={cand_is_finite}"
+                ),
+            )
+
+        reference_norm = torch.linalg.vector_norm(reference_float)
+        candidate_norm = torch.linalg.vector_norm(candidate_float)
+        candidate_is_zero = (
+            float(reference_norm.item()) > 0.0 and float(candidate_norm.item()) == 0.0
+        )
+
         abs_diff = (reference_float - candidate_float).abs()
         max_elementwise_abs_diff = float(abs_diff.max().item()) if abs_diff.numel() else 0.0
         denominator = reference_float.abs().clamp_min(max(atol, 1e-12))
         max_elementwise_rel_diff = (
             float((abs_diff / denominator).max().item()) if abs_diff.numel() else 0.0
         )
-        passed = bool(torch.allclose(reference_float, candidate_float, atol=atol, rtol=rtol))
+        diff_l2 = torch.linalg.vector_norm(reference_float - candidate_float)
+        relative_l2 = float((diff_l2 / reference_norm.clamp_min(1e-12)).item())
+        passed = (
+            relative_l2 <= max_rel_l2
+            if max_rel_l2 is not None
+            else bool(
+                torch.allclose(
+                    reference_float,
+                    candidate_float,
+                    atol=atol,
+                    rtol=rtol,
+                )
+            )
+        )
+        if candidate_is_zero and not passed:
+            error = "Candidate output is all zero while reference output is non-zero"
     else:
         passed = bool(torch.equal(reference_tensor, candidate_tensor))
         max_elementwise_abs_diff = 0.0 if passed else 1.0
-        max_elementwise_rel_diff = 0.0 if passed else float("inf")
+        max_elementwise_rel_diff = 0.0 if passed else 1.0
+        relative_l2 = None
 
     return OutputDiff(
         name=name,
         passed=passed,
         max_elementwise_abs_diff=max_elementwise_abs_diff,
         max_elementwise_rel_diff=max_elementwise_rel_diff,
+        relative_l2=relative_l2,
+        error=error,
     )
 
 
@@ -233,6 +294,8 @@ def check_correctness(
     artifact_dir: Path | None = None,
     artifact_root: Path | None = None,
     candidate_timeout_s: int | float | None = _DEFAULT_CANDIDATE_TIMEOUT_S,
+    max_rel_l2: float | None = None,
+    untrusted_mode: bool = False,
 ) -> CorrectnessShapeResult:
     """Compare candidate outputs against the eager reference baseline for one shape.
 
@@ -246,6 +309,10 @@ def check_correctness(
             status="failed",
             reason="num_correctness_cases must be at least 1",
         )
+    try:
+        effective_max_rel_l2 = configured_max_rel_l2(max_rel_l2)
+    except ValueError as error:
+        return CorrectnessShapeResult(status="failed", reason=str(error))
 
     try:
         resolved_device = get_device(device)
@@ -350,6 +417,21 @@ def check_correctness(
                         case_index, f"{candidate_timeout_s}s timeout"
                     )
                     break
+                if untrusted_mode:
+                    try:
+                        check_plain_tensor_outputs(candidate_output)
+                    except RewardHackDetected as reward_hack:
+                        failed_cases += 1
+                        case_records.append(
+                            CorrectnessCase(
+                                input_artifact=artifact,
+                                error=str(reward_hack),
+                            )
+                        )
+                        _abort_remaining_cases(
+                            case_index, "untrusted output guard failed"
+                        )
+                        break
 
             try:
                 _validate_output_structures_match(reference_output, candidate_output)
@@ -395,6 +477,7 @@ def check_correctness(
                     name=_flatten_output_name(raw_name),
                     atol=atol,
                     rtol=rtol,
+                    max_rel_l2=effective_max_rel_l2,
                 )
                 output_diffs.append(output_diff)
                 if not output_diff.passed:

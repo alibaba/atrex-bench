@@ -1,20 +1,28 @@
 """Tests for Stage 2: performance profiling."""
 
+import builtins
+import contextlib
+import os
+import subprocess
+import sys
+import textwrap
+import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
 
+from atrex_bench.eval import performance as performance_module
 from atrex_bench.eval.performance import (
+    PerformanceSample,
+    PerformanceShapeResult,
     benchmark_performance,
     benchmark_reference_torch_compile,
 )
 
 REFERENCE_PATH = Path(__file__).parent / "fixtures" / "references" / "atrex_001" / "reference.py"
 CANDIDATE_PATH = Path(__file__).parent / "fixtures" / "generations" / "atrex_001.py"
-
-# Performance benchmarking requires torch.cuda or torch.hip for do_bench timing
-_gpu_available = torch.cuda.is_available()
 
 
 def _write_python_file(tmp_path: Path, name: str, content: str) -> Path:
@@ -23,7 +31,560 @@ def _write_python_file(tmp_path: Path, name: str, content: str) -> Path:
     return file_path
 
 
-@pytest.mark.skipif(not _gpu_available, reason="requires CUDA/HIP GPU")
+def test_performance_result_records_cuda_graph_metadata() -> None:
+    result = PerformanceShapeResult(
+        benchmark_mode="cuda_graph_replay",
+        capture_time_ms=3.5,
+        cache_flush_mb=1024,
+        graph_correctness={"passed": True, "outputs": []},
+    )
+
+    assert result.benchmark_mode == "cuda_graph_replay"
+    assert result.capture_time_ms == 3.5
+    assert result.cache_flush_mb == 1024
+    assert result.graph_correctness == {"passed": True, "outputs": []}
+
+
+def test_cuda_graph_mode_rejects_cpu_device() -> None:
+    result = benchmark_performance(
+        CANDIDATE_PATH,
+        REFERENCE_PATH,
+        warmup_iters=1,
+        bench_iters=1,
+        benchmark_mode="cuda_graph_replay",
+        device="cpu",
+    )
+
+    assert result.samples == []
+    assert result.error is not None
+    assert "requires a CUDA device" in result.error
+
+
+def test_unknown_benchmark_mode_is_rejected() -> None:
+    result = benchmark_performance(
+        CANDIDATE_PATH,
+        REFERENCE_PATH,
+        warmup_iters=1,
+        bench_iters=1,
+        benchmark_mode="unknown",
+        device="cpu",
+    )
+
+    assert result.samples == []
+    assert result.error is not None
+    assert "unsupported benchmark_mode" in result.error
+
+
+@pytest.mark.parametrize("collect_kernel_events", [False, True])
+def test_measure_runner_dispatches_cuda_graph_mode(monkeypatch, collect_kernel_events) -> None:
+    calls: list[str] = []
+    expected = performance_module._MeasurementResult(
+        samples=[PerformanceSample(end_to_end_time_ms=1.25)],
+    )
+
+    monkeypatch.setattr(
+        performance_module,
+        "_measure_eager_samples",
+        lambda **_kwargs: calls.append("eager"),
+    )
+    def fake_cuda_graph(**kwargs):
+        assert kwargs["collect_kernel_events"] is collect_kernel_events
+        calls.append("cuda_graph_replay")
+        return expected
+
+    monkeypatch.setattr(performance_module, "_measure_cuda_graph_samples", fake_cuda_graph)
+    monkeypatch.setattr(
+        performance_module,
+        "clone_model_inputs",
+        lambda value: value,
+    )
+
+    result = performance_module._measure_runner_samples(
+        torch.nn.Identity(),
+        SimpleNamespace(args=(torch.ones(1),), kwargs={}),
+        torch.device("cuda"),
+        warmup_iters=1,
+        bench_iters=2,
+        benchmark_mode="cuda_graph_replay",
+        collect_kernel_events=collect_kernel_events,
+    )
+
+    assert result is expected
+    assert calls == ["cuda_graph_replay"]
+
+
+def test_bench_fn_returns_the_forward_output(monkeypatch) -> None:
+    """The timed closure must hand back what the forward returned.
+
+    ``_measure_cuda_graph_samples`` captures and compares that value, so
+    wrapping the forward -- as the NVTX range does -- must not swallow it.
+    """
+    captured: dict[str, object] = {}
+    expected = performance_module._MeasurementResult(
+        samples=[PerformanceSample(end_to_end_time_ms=1.25)],
+    )
+
+    def _fake_cuda_graph(**kwargs):
+        captured["bench_fn"] = kwargs["bench_fn"]
+        return expected
+
+    monkeypatch.setattr(
+        performance_module, "_measure_cuda_graph_samples", _fake_cuda_graph
+    )
+    monkeypatch.setattr(performance_module, "clone_model_inputs", lambda value: value)
+
+    sentinel = torch.ones(3)
+    performance_module._measure_runner_samples(
+        torch.nn.Identity(),
+        SimpleNamespace(args=(sentinel,), kwargs={}),
+        torch.device("cuda"),
+        warmup_iters=1,
+        bench_iters=2,
+        benchmark_mode="cuda_graph_replay",
+    )
+
+    assert torch.equal(captured["bench_fn"](), sentinel)
+
+
+def test_eager_mode_keeps_every_iteration(monkeypatch) -> None:
+    """do_bench measures each iteration; eager must not throw them away.
+
+    The cuda_graph path already emits one sample per iteration, and
+    PerformanceSample documents the list as iteration-ordered.
+    """
+    recorded: dict[str, object] = {}
+
+    def _fake_do_bench(_fn, *, warmup, rep, return_mode=None):
+        recorded["return_mode"] = return_mode
+        return [1.0, 2.0, 3.0]
+
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "triton.testing",
+        SimpleNamespace(do_bench=_fake_do_bench),
+    )
+
+    result = performance_module._measure_eager_samples(
+        bench_fn=lambda: None,
+        device=torch.device("cpu"),
+        warmup_iters=1,
+        bench_iters=3,
+    )
+
+    assert recorded["return_mode"] == "all"
+    assert [s.end_to_end_time_ms for s in result.samples] == [1.0, 2.0, 3.0]
+
+
+def test_eager_mode_falls_back_when_triton_cannot_report_each_run(monkeypatch) -> None:
+    """An older do_bench rejects return_mode; keep the reduced value, do not fail."""
+
+    def _old_do_bench(_fn, *, warmup, rep, **kwargs):
+        if kwargs:
+            raise TypeError("do_bench() got an unexpected keyword argument")
+        return 4.5
+
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "triton.testing",
+        SimpleNamespace(do_bench=_old_do_bench),
+    )
+
+    result = performance_module._measure_eager_samples(
+        bench_fn=lambda: None,
+        device=torch.device("cpu"),
+        warmup_iters=1,
+        bench_iters=3,
+    )
+
+    assert [s.end_to_end_time_ms for s in result.samples] == [4.5]
+
+
+def test_forward_nvtx_is_a_noop_without_cuda(monkeypatch) -> None:
+    """No CUDA means no NVTX range, and no failure either."""
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+
+    with performance_module._forward_nvtx():
+        pass
+
+
+def test_forward_nvtx_survives_a_missing_nvtx_backend(monkeypatch) -> None:
+    """A build without NVTX must degrade to a no-op, not fail the measurement."""
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+
+    def _unavailable(_name):
+        raise RuntimeError("NVTX is not available in this build")
+
+    monkeypatch.setattr(torch.cuda.nvtx, "range", _unavailable)
+
+    with performance_module._forward_nvtx():
+        pass
+
+
+@pytest.mark.parametrize("device_name", ["cpu", "cuda:1"])
+def test_device_profiler_warmup_uses_a_separate_trace(monkeypatch, device_name) -> None:
+    events = []
+    device = torch.device(device_name)
+
+    def allocate(size, *, device):
+        assert size == 1
+        assert device == torch.device(device_name)
+        events.append("allocate")
+        return SimpleNamespace(add_=lambda value: events.append(("kernel", value)))
+
+    @contextlib.contextmanager
+    def fake_profile(**kwargs):
+        assert kwargs == {"activities": performance_module._profile_activities(device)}
+        events.append("profile-enter")
+        yield
+        events.append("profile-exit")
+
+    monkeypatch.setattr(torch, "zeros", allocate)
+    monkeypatch.setattr(performance_module, "profile", fake_profile)
+    monkeypatch.setattr(performance_module, "sync_device", lambda dev: events.append(("sync", dev)))
+
+    performance_module._warmup_device_profiler(device)
+
+    if device.type == "cuda":
+        assert events == [
+            "allocate", "profile-enter", ("kernel", 1), ("sync", device), "profile-exit",
+        ]
+    else:
+        assert events == []
+
+
+@pytest.mark.parametrize("collect_kernel_events", [False, True])
+def test_eager_profiler_warmup_is_outside_timed_samples(monkeypatch, collect_kernel_events) -> None:
+    events = []
+    measurement = performance_module._MeasurementResult(samples=[PerformanceSample(0.5)])
+
+    def measure(**kwargs):
+        events.append("timing")
+        return measurement
+
+    @contextlib.contextmanager
+    def fake_profile(**kwargs):
+        assert events == ["timing", "warmup"]
+        events.append("profile")
+        yield SimpleNamespace(step=lambda: None, events=lambda: [])
+
+    monkeypatch.setattr(performance_module, "_measure_eager_samples", measure)
+    monkeypatch.setattr(
+        performance_module, "_warmup_device_profiler", lambda dev: events.append("warmup"),
+    )
+    monkeypatch.setattr(performance_module, "profile", fake_profile)
+    monkeypatch.setattr(performance_module, "sync_device", lambda dev: None)
+
+    result = performance_module._measure_runner_samples(
+        torch.nn.Identity(), SimpleNamespace(args=(torch.ones(1),), kwargs={}),
+        torch.device("cpu"), warmup_iters=1, bench_iters=3,
+        collect_kernel_events=collect_kernel_events,
+    )
+
+    assert result.samples is measurement.samples
+    assert events == (["timing", "warmup", "profile"] if collect_kernel_events else ["timing"])
+
+
+@pytest.mark.skipif(os.name != "posix", reason="requires SIGALRM performance timeout")
+def test_profiler_warmup_obeys_performance_timeout(monkeypatch) -> None:
+    monkeypatch.setattr(
+        performance_module, "_measure_eager_samples",
+        lambda **kwargs: performance_module._MeasurementResult(samples=[PerformanceSample(0.5)]),
+    )
+    monkeypatch.setattr(performance_module, "_warmup_device_profiler", lambda dev: time.sleep(10))
+
+    with pytest.raises(performance_module.CandidateTimeoutError):
+        performance_module._measure_runner_samples(
+            torch.nn.Identity(), SimpleNamespace(args=(torch.ones(1),), kwargs={}),
+            torch.device("cpu"), warmup_iters=1, bench_iters=3,
+            collect_kernel_events=True, perf_timeout_s=0.05,
+        )
+
+
+@pytest.mark.parametrize("collect_kernel_events", [False, True])
+def test_cuda_graph_measurement_captures_once_and_replays(
+    monkeypatch, collect_kernel_events: bool,
+) -> None:
+    calls = {"forward": 0, "replay": 0, "flush": 0}
+    profiling = False
+    profiled_replays = 0
+    profiler_steps = 0
+    forward_markers = 0
+    profiler_warmed = False
+
+    def warmup_profiler(device):
+        nonlocal profiler_warmed
+        assert device == torch.device("cuda")
+        assert calls == {"forward": 3, "replay": 5, "flush": 5}
+        assert not profiling
+        profiler_warmed = True
+
+    class FakeProfiler:
+        def step(self):
+            nonlocal profiler_steps
+            profiler_steps += 1
+
+        def events(self):
+            return [
+                SimpleNamespace(
+                    name="my_op", device_type="DeviceType.CUDA", self_device_time_total=50.0,
+                )
+                for _ in range(2 * profiled_replays)
+            ]
+
+    @contextlib.contextmanager
+    def fake_profile(**kwargs):
+        nonlocal profiling
+        assert collect_kernel_events
+        assert profiler_warmed
+        assert kwargs["acc_events"] is True
+        assert calls == {"forward": 3, "replay": 5, "flush": 5}
+        profiling = True
+        yield FakeProfiler()
+        profiling = False
+
+    @contextlib.contextmanager
+    def fake_record_function(label):
+        nonlocal forward_markers
+        assert label == performance_module._MODEL_FORWARD_LABEL
+        assert profiling
+        forward_markers += 1
+        yield
+
+    class FakeGraph:
+        def replay(self) -> None:
+            nonlocal profiled_replays
+            calls["replay"] += 1
+            if profiling:
+                profiled_replays += 1
+
+    class FakeEvent:
+        def __init__(self, *, enable_timing: bool):
+            assert enable_timing is True
+
+        def record(self) -> None:
+            assert not profiling, "profiler must not contaminate timed samples"
+
+        def elapsed_time(self, _other) -> float:
+            return 0.5
+
+    def bench_fn():
+        assert not profiling, "profile graph replay, not eager forward or capture"
+        calls["forward"] += 1
+        return torch.ones(2)
+
+    def flush_cache(_size, _device):
+        assert not profiling, "cache flushing must not contribute to attribution"
+        calls["flush"] += 1
+
+    monkeypatch.setattr(performance_module, "profile", fake_profile)
+    monkeypatch.setattr(performance_module, "_warmup_device_profiler", warmup_profiler)
+    monkeypatch.setattr(performance_module, "record_function", fake_record_function)
+    monkeypatch.setattr(torch.cuda, "CUDAGraph", FakeGraph)
+    monkeypatch.setattr(
+        torch.cuda,
+        "graph",
+        lambda _graph: contextlib.nullcontext(),
+    )
+    monkeypatch.setattr(torch.cuda, "Event", FakeEvent)
+    monkeypatch.setattr(performance_module, "sync_device", lambda _device: None)
+    monkeypatch.setattr(
+        performance_module,
+        "_flush_cuda_cache",
+        flush_cache,
+    )
+
+    result = performance_module._measure_cuda_graph_samples(
+        bench_fn=bench_fn,
+        device=torch.device("cuda"),
+        warmup_iters=2,
+        bench_iters=3,
+        cache_flush_mb=1024,
+        atol=1e-2,
+        rtol=0.05,
+        collect_kernel_events=collect_kernel_events,
+    )
+
+    breakdown_iters = performance_module._PROFILER_BREAKDOWN_ITERS if collect_kernel_events else 0
+    assert calls == {
+        "forward": 3,
+        "replay": 5 + breakdown_iters,
+        "flush": 5,
+    }
+    assert profiled_replays == profiler_steps == forward_markers == breakdown_iters
+    assert profiler_warmed is collect_kernel_events
+    assert result.capture_time_ms is not None
+    if collect_kernel_events:
+        assert result.kernel_events == [performance_module.KernelTimingEvent("my_op", 100.0, 2)]
+    else:
+        assert result.kernel_events == []
+    assert [sample.end_to_end_time_ms for sample in result.samples] == [
+        0.5,
+        0.5,
+        0.5,
+    ]
+    assert result.graph_correctness is not None
+    assert result.graph_correctness["passed"] is True
+
+
+def test_cuda_graph_cosine_policy_accepts_atomic_variation() -> None:
+    eager = torch.ones(16384)
+    graph = eager.clone()
+    graph[0] = 2.0
+
+    strict = performance_module._compare_graph_outputs(
+        [("output", eager)],
+        graph,
+        atol=1e-2,
+        rtol=0.05,
+        min_cosine=None,
+        max_rel_l2=None,
+    )
+    cosine = performance_module._compare_graph_outputs(
+        [("output", eager)],
+        graph,
+        atol=1e-2,
+        rtol=0.05,
+        min_cosine=0.999,
+        max_rel_l2=0.01,
+    )
+
+    assert strict["passed"] is False
+    assert strict["policy"] == {
+        "type": "allclose",
+        "atol": 1e-2,
+        "rtol": 0.05,
+    }
+    assert cosine["passed"] is True
+    assert cosine["policy"] == {
+        "type": "cosine_rel_l2",
+        "min_cosine": 0.999,
+        "max_rel_l2": 0.01,
+    }
+    assert cosine["outputs"][0]["cosine_similarity"] >= 0.999
+    assert cosine["outputs"][0]["relative_l2"] <= 0.01
+    assert cosine["outputs"][0]["max_elementwise_abs_diff"] == 1.0
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA/HIP GPU")
+def test_cuda_graph_replay_collects_real_device_events() -> None:
+    from atrex_bench.eval._runtime import ModelInputs
+
+    class TwoLaunches(torch.nn.Module):
+        def forward(self, value):
+            return torch.sin(torch.sin(value))
+
+    result = performance_module._measure_runner_samples(
+        TwoLaunches(), ModelInputs(args=(torch.ones(4096, device="cuda"),), kwargs={}),
+        torch.device("cuda"), warmup_iters=2, bench_iters=3,
+        benchmark_mode="cuda_graph_replay", cache_flush_mb=0, collect_kernel_events=True,
+    )
+    assert len(result.samples) == 3
+    assert result.graph_correctness["passed"] is True
+    assert result.capture_time_ms is not None
+    assert result.kernel_events
+    assert sum(event.calls for event in result.kernel_events) >= 2
+    assert all(event.device_time_us > 0 for event in result.kernel_events)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA/HIP GPU")
+@pytest.mark.parametrize("benchmark_mode", ["eager", "cuda_graph_replay"])
+def test_first_measurement_collects_device_events_in_fresh_process(benchmark_mode) -> None:
+    # A previous profiler context in the pytest process can mask cold-start
+    # failures. Each mode must collect events in a newly started interpreter.
+    script = textwrap.dedent("""
+        import math
+        import sys
+        import torch
+        from atrex_bench.eval._runtime import ModelInputs
+        from atrex_bench.eval.performance import _measure_runner_samples
+
+        class TwoLaunches(torch.nn.Module):
+            def forward(self, value):
+                return torch.sin(torch.sin(value))
+
+        mode = sys.argv[1]
+        result = _measure_runner_samples(
+            TwoLaunches(), ModelInputs(args=(torch.ones(4096, device="cuda"),), kwargs={}),
+            torch.device("cuda"), warmup_iters=2, bench_iters=3,
+            benchmark_mode=mode, cache_flush_mb=0, collect_kernel_events=True,
+        )
+        print(result, flush=True)
+        assert result.samples
+        assert all(math.isfinite(s.end_to_end_time_ms) and s.end_to_end_time_ms > 0
+                   for s in result.samples)
+        # Only the two same-symbol candidate launches count, not the primer.
+        assert len(result.kernel_events) == 1, result.kernel_events
+        event = result.kernel_events[0]
+        assert event.calls == 2, event
+        assert math.isfinite(event.device_time_us) and event.device_time_us > 0
+        if mode == "cuda_graph_replay":
+            assert len(result.samples) == 3
+            assert result.graph_correctness["passed"] is True
+            assert result.capture_time_ms is not None
+    """)
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join([
+        str(Path(performance_module.__file__).resolve().parents[2]),
+        env.get("PYTHONPATH", ""),
+    ])
+    completed = subprocess.run(
+        [sys.executable, "-c", script, benchmark_mode], env=env,
+        capture_output=True, text=True, timeout=90,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+def test_cuda_graph_cosine_policy_rejects_scale_drift() -> None:
+    eager = torch.ones(4096)
+    graph = eager * 2.0
+
+    result = performance_module._compare_graph_outputs(
+        [("output", eager)],
+        graph,
+        atol=1e-2,
+        rtol=0.05,
+        min_cosine=0.999,
+        max_rel_l2=0.01,
+    )
+
+    assert result["outputs"][0]["cosine_similarity"] == 1.0
+    assert result["outputs"][0]["relative_l2"] == 1.0
+    assert result["passed"] is False
+
+
+def test_eager_fallback_warms_once_when_warmup_zero(monkeypatch) -> None:
+    events: list[str] = []
+
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):  # noqa: ANN001
+        if name == "triton.testing":
+            raise ModuleNotFoundError("No module named 'triton'", name="triton")
+        return real_import(name, *args, **kwargs)
+
+    def fake_perf_counter() -> float:
+        events.append("clock")
+        return float(len(events))
+
+    def bench_fn() -> torch.Tensor:
+        events.append("bench")
+        return torch.ones(1)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    monkeypatch.setattr(performance_module.time, "perf_counter", fake_perf_counter)
+    monkeypatch.setattr(performance_module, "sync_device", lambda _device: events.append("sync"))
+
+    result = performance_module._measure_eager_samples(
+        bench_fn=bench_fn,
+        device=torch.device("cpu"),
+        warmup_iters=0,
+        bench_iters=2,
+    )
+
+    assert result.samples
+    assert events == ["bench", "sync", "clock", "bench", "bench", "sync", "clock"]
+
+
 def test_benchmark_returns_timing() -> None:
     result = benchmark_performance(
         CANDIDATE_PATH,
@@ -39,7 +600,6 @@ def test_benchmark_returns_timing() -> None:
         assert sample.end_to_end_time_ms > 0
 
 
-@pytest.mark.skipif(not _gpu_available, reason="requires CUDA/HIP GPU")
 def test_benchmark_reference_torch_compile_returns_timing(monkeypatch) -> None:
     compiled_models = []
 
@@ -64,7 +624,6 @@ def test_benchmark_reference_torch_compile_returns_timing(monkeypatch) -> None:
         assert sample.end_to_end_time_ms > 0
 
 
-@pytest.mark.skipif(not _gpu_available, reason="requires CUDA/HIP GPU")
 def test_benchmark_reference_torch_compile_writes_seed_artifact(
     tmp_path: Path,
     monkeypatch,
@@ -86,7 +645,6 @@ def test_benchmark_reference_torch_compile_writes_seed_artifact(
     assert "path" not in result.input_artifact
 
 
-@pytest.mark.skipif(not _gpu_available, reason="requires CUDA/HIP GPU")
 def test_benchmark_writes_seed_artifact(tmp_path: Path) -> None:
     reference_path = _write_python_file(
         tmp_path,
@@ -182,3 +740,27 @@ def test_benchmark_error_handled(tmp_path: Path) -> None:
     assert result.samples == []
     assert result.error is not None
     assert "init failure" in result.error
+
+
+def test_candidate_timeout_before_input_artifact_preserves_timeout_error(
+    monkeypatch,
+) -> None:
+    def timeout_before_inputs(*_args, **_kwargs):
+        raise performance_module.CandidateTimeoutError("candidate timed out during init")
+
+    monkeypatch.setattr(
+        performance_module,
+        "instantiate_model_module",
+        timeout_before_inputs,
+    )
+
+    result = benchmark_performance(
+        CANDIDATE_PATH,
+        REFERENCE_PATH,
+        warmup_iters=1,
+        bench_iters=1,
+        device="cpu",
+    )
+
+    assert result.input_artifact is None
+    assert result.error == "candidate timed out during init"

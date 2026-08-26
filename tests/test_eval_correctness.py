@@ -2,8 +2,6 @@
 
 from pathlib import Path
 
-import torch
-
 from atrex_bench.eval.correctness import check_correctness
 
 REFERENCE_PATH = Path(__file__).parent / "fixtures" / "references" / "atrex_001" / "reference.py"
@@ -107,6 +105,258 @@ def test_relative_tolerance_is_configurable(tmp_path: Path) -> None:
     strict_max_rel = strict_result.cases[0].outputs[0].max_elementwise_rel_diff
     assert strict_max_rel is not None
     assert strict_max_rel > 0.01
+
+
+def test_relative_l2_policy_is_configurable(tmp_path: Path) -> None:
+    reference_path = _write_python_file(
+        tmp_path,
+        "reference.py",
+        "\n".join(
+            [
+                "import torch",
+                "import torch.nn as nn",
+                "",
+                "class Model(nn.Module):",
+                "    def __init__(self):",
+                "        super().__init__()",
+                "",
+                "    def forward(self, x):",
+                "        return torch.ones_like(x)",
+                "",
+                "def get_inputs():",
+                "    return [torch.zeros(4, 4)]",
+                "",
+                "def get_init_inputs():",
+                "    return []",
+            ]
+        ),
+    )
+    candidate_path = _write_python_file(
+        tmp_path,
+        "candidate.py",
+        "\n".join(
+            [
+                "import torch",
+                "import torch.nn as nn",
+                "",
+                "class Model(nn.Module):",
+                "    def __init__(self):",
+                "        super().__init__()",
+                "",
+                "    def forward(self, x):",
+                "        return torch.full_like(x, 1.1)",
+            ]
+        ),
+    )
+
+    accepted = check_correctness(
+        reference_path,
+        candidate_path,
+        max_rel_l2=0.2,
+        device="cpu",
+    )
+    rejected = check_correctness(
+        reference_path,
+        candidate_path,
+        max_rel_l2=0.05,
+        device="cpu",
+    )
+
+    assert accepted.status == "passed"
+    assert rejected.status == "failed"
+    relative_l2 = accepted.cases[0].outputs[0].relative_l2
+    assert relative_l2 is not None
+    assert abs(relative_l2 - 0.1) < 1e-6
+
+
+def test_nonfinite_candidate_output_fails_with_finite_metrics(tmp_path: Path) -> None:
+    reference_path = _write_python_file(
+        tmp_path,
+        "reference.py",
+        "\n".join(
+            [
+                "import torch",
+                "import torch.nn as nn",
+                "",
+                "class Model(nn.Module):",
+                "    def forward(self, x):",
+                "        return torch.ones_like(x)",
+                "",
+                "def get_inputs():",
+                "    return [torch.zeros(2, 2)]",
+                "",
+                "def get_init_inputs():",
+                "    return []",
+            ]
+        ),
+    )
+    candidate_path = _write_python_file(
+        tmp_path,
+        "candidate.py",
+        "\n".join(
+            [
+                "import torch",
+                "import torch.nn as nn",
+                "",
+                "class Model(nn.Module):",
+                "    def forward(self, x):",
+                "        return torch.full_like(x, float('nan'))",
+            ]
+        ),
+    )
+
+    result = check_correctness(reference_path, candidate_path, device="cpu")
+
+    assert result.status == "failed"
+    diff = result.cases[0].outputs[0]
+    assert diff.passed is False
+    assert diff.error is not None
+    assert "Non-finite output" in diff.error
+    assert diff.max_elementwise_abs_diff == 0.0
+    assert diff.max_elementwise_rel_diff == 0.0
+    assert diff.relative_l2 == 0.0
+
+
+def test_all_zero_candidate_output_fails(tmp_path: Path) -> None:
+    reference_path = _write_python_file(
+        tmp_path,
+        "reference.py",
+        "\n".join(
+            [
+                "import torch",
+                "import torch.nn as nn",
+                "",
+                "class Model(nn.Module):",
+                "    def forward(self, x):",
+                "        return torch.ones_like(x)",
+                "",
+                "def get_inputs():",
+                "    return [torch.zeros(2, 2)]",
+                "",
+                "def get_init_inputs():",
+                "    return []",
+            ]
+        ),
+    )
+    candidate_path = _write_python_file(
+        tmp_path,
+        "candidate.py",
+        "\n".join(
+            [
+                "import torch",
+                "import torch.nn as nn",
+                "",
+                "class Model(nn.Module):",
+                "    def forward(self, x):",
+                "        return torch.zeros_like(x)",
+            ]
+        ),
+    )
+
+    result = check_correctness(reference_path, candidate_path, device="cpu")
+
+    assert result.status == "failed"
+    diff = result.cases[0].outputs[0]
+    assert diff.passed is False
+    assert diff.error == "Candidate output is all zero while reference output is non-zero"
+    assert diff.max_elementwise_rel_diff == 1.0
+    assert diff.relative_l2 == 1.0
+
+
+def test_all_zero_candidate_respects_configured_tolerance(tmp_path: Path) -> None:
+    reference_path = _write_python_file(
+        tmp_path,
+        "reference.py",
+        "\n".join(
+            [
+                "import torch",
+                "import torch.nn as nn",
+                "",
+                "class Model(nn.Module):",
+                "    def forward(self, x):",
+                "        return torch.full_like(x, 1e-6)",
+                "",
+                "def get_inputs():",
+                "    return [torch.zeros(2, 2)]",
+                "",
+                "def get_init_inputs():",
+                "    return []",
+            ]
+        ),
+    )
+    candidate_path = _write_python_file(
+        tmp_path,
+        "candidate.py",
+        "\n".join(
+            [
+                "import torch",
+                "import torch.nn as nn",
+                "",
+                "class Model(nn.Module):",
+                "    def forward(self, x):",
+                "        return torch.zeros_like(x)",
+            ]
+        ),
+    )
+
+    result = check_correctness(
+        reference_path,
+        candidate_path,
+        atol=1e-2,
+        rtol=0.05,
+        device="cpu",
+    )
+
+    assert result.status == "passed"
+    diff = result.cases[0].outputs[0]
+    assert diff.passed is True
+    assert diff.error is None
+
+
+def test_integer_mismatch_records_finite_rel_diff(tmp_path: Path) -> None:
+    reference_path = _write_python_file(
+        tmp_path,
+        "reference.py",
+        "\n".join(
+            [
+                "import torch",
+                "import torch.nn as nn",
+                "",
+                "class Model(nn.Module):",
+                "    def forward(self, x):",
+                "        return torch.ones(2, 2, dtype=torch.int64)",
+                "",
+                "def get_inputs():",
+                "    return [torch.zeros(2, 2)]",
+                "",
+                "def get_init_inputs():",
+                "    return []",
+            ]
+        ),
+    )
+    candidate_path = _write_python_file(
+        tmp_path,
+        "candidate.py",
+        "\n".join(
+            [
+                "import torch",
+                "import torch.nn as nn",
+                "",
+                "class Model(nn.Module):",
+                "    def forward(self, x):",
+                "        return torch.zeros(2, 2, dtype=torch.int64)",
+            ]
+        ),
+    )
+
+    result = check_correctness(reference_path, candidate_path, device="cpu")
+
+    assert result.status == "failed"
+    diff = result.cases[0].outputs[0]
+    assert diff.max_elementwise_abs_diff == 1.0
+    assert diff.max_elementwise_rel_diff == 1.0
+    assert diff.relative_l2 is None
+    assert diff.error is None
 
 
 def test_runtime_error_fails(tmp_path: Path) -> None:

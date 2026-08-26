@@ -8,6 +8,7 @@ The runtime tracker itself is tested in ``test_eval_flydsl_tracker.py``;
 end-to-end coverage of the sub-worker wiring lives in
 ``test_eval_performance.py`` and ``test_run_eval.py``.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -21,7 +22,6 @@ from atrex_bench.eval.performance import (
     PerformanceSample,
     PerformanceShapeResult,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -57,6 +57,33 @@ def _candidate(tmp_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 # Non-flydsl + early-exit paths (don't need observed_kernels)
 # ---------------------------------------------------------------------------
+
+
+def test_e2e_denominator_is_the_median_not_the_first_sample() -> None:
+    """A shape's e2e denominator reduces every sample, it does not index one.
+
+    Indexing worked only while the eager path emitted a single pre-reduced
+    value; among per-iteration samples the first one is the coldest, not the
+    typical one.
+    """
+    from atrex_bench.eval.kernel_attribution import _representative_e2e_ms
+    from atrex_bench.eval.performance import PerformanceSample
+
+    samples = [
+        PerformanceSample(end_to_end_time_ms=9.0),  # cold first iteration
+        PerformanceSample(end_to_end_time_ms=2.0),
+        PerformanceSample(end_to_end_time_ms=2.5),
+    ]
+
+    assert _representative_e2e_ms(samples) == 2.5
+
+
+def test_e2e_denominator_ignores_samples_without_a_timing() -> None:
+    from atrex_bench.eval.kernel_attribution import _representative_e2e_ms
+    from atrex_bench.eval.performance import PerformanceSample
+
+    assert _representative_e2e_ms([PerformanceSample(end_to_end_time_ms=None)]) is None
+    assert _representative_e2e_ms([]) is None
 
 
 def test_ratio_non_flydsl_is_zero_with_error(tmp_path: Path) -> None:
@@ -121,7 +148,7 @@ def test_ratio_error_when_observed_kernels_missing(tmp_path: Path) -> None:
 
 def test_ratio_pure_flydsl_is_one_via_exact_name(tmp_path: Path) -> None:
     perf = _perf(
-        [KernelTimingEvent("my_op", 1000.0, 10)],
+        [KernelTimingEvent("my_op", 1000.0, 1)],
         observed_kernels={"exact_names": ["my_op"], "func_names": []},
     )
     result = compute_flydsl_compute_ratio_for_shape(
@@ -139,7 +166,7 @@ def test_ratio_pure_flydsl_via_func_pattern(tmp_path: Path) -> None:
     """``func_names: ['_moe_kernel']`` matches ``_moe_kernel_<digits>``.
     500us flydsl over 1000us e2e wall -> ratio 0.5."""
     perf = _perf(
-        [KernelTimingEvent("_moe_kernel_5", 500.0, 3)],
+        [KernelTimingEvent("_moe_kernel_5", 500.0, 1)],
         observed_kernels={"exact_names": [], "func_names": ["_moe_kernel"]},
     )
     result = compute_flydsl_compute_ratio_for_shape(
@@ -149,15 +176,39 @@ def test_ratio_pure_flydsl_via_func_pattern(tmp_path: Path) -> None:
     assert result.kernel_breakdown[0].is_flydsl is True
 
 
+def test_ratio_keeps_all_launches_of_the_same_kernel_per_forward(tmp_path: Path) -> None:
+    perf = _perf(
+        [KernelTimingEvent("my_op", 100.0, 2)],
+        observed_kernels={"exact_names": ["my_op"], "func_names": []},
+        e2e_ms=0.1,
+    )
+    result = compute_flydsl_compute_ratio_for_shape(_candidate(tmp_path), perf, dsl="flydsl")
+    assert result.ratio == 1.0
+    assert result.flydsl_device_time_us == 100.0
+    assert result.kernel_breakdown[0].device_time_us == 100.0
+    assert result.kernel_breakdown[0].calls == 2
+
+
+def test_ratio_mixed_kernels_keeps_per_forward_totals(tmp_path: Path) -> None:
+    perf = _perf(
+        [KernelTimingEvent("my_op", 60.0, 3), KernelTimingEvent("torch_op", 40.0, 2)],
+        observed_kernels={"exact_names": ["my_op"], "func_names": []},
+        e2e_ms=0.1,
+    )
+    result = compute_flydsl_compute_ratio_for_shape(_candidate(tmp_path), perf, dsl="flydsl")
+    assert result.ratio == 0.6
+    assert [event.device_time_us for event in result.kernel_breakdown] == [60.0, 40.0]
+
+
 def test_ratio_mixed_flydsl_and_torch(tmp_path: Path) -> None:
     """Mixed events. Total kernel device time 6000us across a 10000us e2e
     wall (10ms) -> flydsl ratio 2000/10000 = 0.2 (NOT 2000/6000 -- the
     denominator is e2e, not sum of kernel events).
     """
     events = [
-        KernelTimingEvent("gdn_gate_o", 2000.0, 64),          # flydsl exact
-        KernelTimingEvent("Cijk_Alik_Bljk_S_...", 3000.0, 64),  # rocBLAS GEMM
-        KernelTimingEvent("void at::native::elementwise_kernel<...>", 1000.0, 64),
+        KernelTimingEvent("gdn_gate_o", 2000.0, 1),          # flydsl exact
+        KernelTimingEvent("Cijk_Alik_Bljk_S_...", 3000.0, 1),  # rocBLAS GEMM
+        KernelTimingEvent("void at::native::elementwise_kernel<...>", 1000.0, 1),
     ]
     perf = _perf(
         events,
