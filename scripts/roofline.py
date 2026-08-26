@@ -41,6 +41,7 @@ from atrex_bench.eval.roofline import (
     DTYPE_PATHS,
     RooflineHardware,
     RooflineResult,
+    apply_launch_overhead,
     compute_roofline,
     compute_roofline_hybrid,
     load_hardware,
@@ -107,7 +108,8 @@ def _format_text_standalone(
         "",
         "Roofline:",
         f"  P_roof:        {_format_tflops(result.p_roof_flops_per_s)}",
-        f"  T_SOL:         {result.sol_time_ms:.4f} ms",
+        f"  T_SOL:         {result.sol_time_ms:.4f} ms"
+        + (" (launch-overhead floor)" if result.clamped_by_overhead else ""),
         f"  Bottleneck:    {result.bottleneck}",
     ]
     return "\n".join(lines)
@@ -746,6 +748,8 @@ def _shape_compute(
             f"shape {shape_id!r}: semantic_Q_*_bytes must be numbers, got "
             f"read={q_read!r}, write={q_write!r}."
         )
+    if q_read < 0 or q_write < 0:
+        raise ValueError(f"shape {shape_id!r}: semantic_Q_*_bytes must be non-negative")
     q_read_int = int(q_read)
     q_write_int = int(q_write)
     q_total = q_read_int + q_write_int
@@ -753,15 +757,17 @@ def _shape_compute(
     if not w_by_dtype:
         # Integer-only / no-FP operator: no compute peak applies; SOL = Q/B_peak.
         sol_time_s = q_total / hw.b_peak_hbm if hw.b_peak_hbm > 0 else 0.0
+        sol_time_s, clamped = apply_launch_overhead(sol_time_s, hw)
         result = RooflineResult(
             arithmetic_intensity=0.0,
             ridge_point_ai=0.0,
             p_roof_flops_per_s=0.0,
             sol_time_s=sol_time_s,
             sol_time_ms=sol_time_s * 1000.0,
-            bottleneck="memory",
+            bottleneck="memory" if q_total else "no_compute",
             p_peak_used=0,
             b_peak_used=hw.b_peak_hbm,
+            clamped_by_overhead=clamped,
         )
     elif len(w_by_dtype) == 1:
         only_dtype = next(iter(w_by_dtype))
@@ -809,6 +815,7 @@ def _format_text_per_op(
             f"{row['p_roof_tflops']:>11.2f} TF "
             f"{row['sol_time_ms']:>11.4f} ms "
             f"{row['bottleneck']:>12}"
+            + (" (launch-overhead floor)" if row["clamped_by_overhead"] else "")
         )
     return "\n".join(lines)
 
@@ -930,6 +937,7 @@ def _run_per_operator(args: argparse.Namespace) -> int:
                 "p_roof_tflops": result.p_roof_flops_per_s / 1e12,
                 "sol_time_ms": result.sol_time_ms,
                 "bottleneck": result.bottleneck,
+                "clamped_by_overhead": result.clamped_by_overhead,
             }
         )
 

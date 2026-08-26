@@ -301,6 +301,10 @@ Most are trace-derived (`status: "trace_reference"`); the rest are curated.
 When adding or reshaping operator data, keep `shapes.json` and `roofline.json` aligned and
 refresh `SOL_time_ms` through `scripts/roofline.py`.
 
+See [SOL semantics](docs/roofline_semantics.md) for the optional dispatch-latency
+floor. Use `scripts/static_roofline_check.py` to validate saved SOL values and
+compare them with production latency on the matching device without running kernels.
+
 ## Citation
 
 Please cite our [paper](https://arxiv.org/abs/2607.14541) if it is helpful to your research.
