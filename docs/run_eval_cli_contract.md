@@ -10,6 +10,12 @@ python scripts/run_eval.py --config /abs/path/run_eval.json
 
 Existing public CLI options remain supported. Explicit CLI options take precedence over the config. Absolute paths are recommended for all path fields.
 
+Python callers can use `atrex_bench.evaluate(config)`. The SDK accepts the same fields as
+`--config`, runs the evaluator in a separate subprocess, and returns the complete
+`eval_result.json` object. Normal compile, correctness, or performance stage failures
+are returned as results. SDK exceptions are raised only when the configuration cannot
+start an evaluation, the subprocess fails abnormally, or the result artifacts are invalid.
+
 ## 2. Configuration Fields
 
 | Field | Type | Required when | Description |
@@ -176,6 +182,11 @@ The following options are reserved for communication between `run_eval` parent a
 - `--checkpoint-root`
 - `--shape-id`
 - `--shape-result-output`
+- `--sdk-result-path-output`
+
+`--sdk-result-path-output` is used only to pass the absolute path of the final
+`eval_result.json` back to the SDK parent process. It is not a public option for
+the Gateway or regular users.
 
 ## 9. Standard Launch Commands
 

@@ -885,6 +885,136 @@ def test_config_only_torch_compile_launch(
     assert calls[0]["bench_iters"] == 7
 
 
+def test_main_writes_sdk_result_pointer_after_candidate_eval(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import run_eval as run_eval_module
+
+    pointer_path = tmp_path / "result-path.txt"
+    output_root = tmp_path / "output"
+    reference_dir = tmp_path / "reference"
+    payload = {
+        "runner_config": {"validation_mode": "full"},
+        "passed": {
+            "compile": {"0": {"status": "passed"}},
+            "correctness": {"0": {"status": "passed"}},
+            "performance": {"0": {"status": "passed"}},
+        },
+        "error": None,
+    }
+    monkeypatch.setattr(run_eval_module, "run_eval", lambda **kwargs: payload)
+    monkeypatch.setattr(
+        run_eval_module,
+        "get_timestamp",
+        lambda timestamp=None: timestamp or "20260820-180000",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_eval.py",
+            "--input",
+            str(tmp_path / "candidate.py"),
+            "--reference-dir",
+            str(reference_dir),
+            "--output",
+            str(output_root),
+            "--sdk-result-path-output",
+            str(pointer_path),
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_eval_module.main()
+
+    assert exc_info.value.code == 0
+    assert pointer_path.read_text(encoding="utf-8") == str(
+        (output_root / "20260820-180000" / "reference" / "eval_result.json").resolve()
+    )
+
+
+def test_main_writes_sdk_result_pointer_after_torch_compile_eval(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import run_eval as run_eval_module
+
+    pointer_path = tmp_path / "result-path.txt"
+    output_root = tmp_path / "output"
+    reference_dir = tmp_path / "reference"
+    payload = {
+        "eval_mode": "torch_compile_reference",
+        "passed": {"compile": {"0": {"status": "passed"}}},
+        "performance": {"shapes": {"0": {"samples": [1.0], "error": None}}},
+        "error": None,
+    }
+    monkeypatch.setattr(
+        run_eval_module,
+        "run_torch_compile_eval",
+        lambda **kwargs: payload,
+    )
+    monkeypatch.setattr(
+        run_eval_module,
+        "get_timestamp",
+        lambda timestamp=None: timestamp or "20260820-180001",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_eval.py",
+            "--torch-compile",
+            "--reference-dir",
+            str(reference_dir),
+            "--output",
+            str(output_root),
+            "--sdk-result-path-output",
+            str(pointer_path),
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_eval_module.main()
+
+    assert exc_info.value.code == 0
+    assert pointer_path.read_text(encoding="utf-8") == str(
+        (output_root / "20260820-180001" / "reference" / "eval_result.json").resolve()
+    )
+
+
+def test_internal_worker_does_not_write_sdk_result_pointer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import run_eval as run_eval_module
+
+    pointer_path = tmp_path / "result-path.txt"
+    monkeypatch.setattr(run_eval_module, "_run_eval_worker", lambda **kwargs: {})
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_eval.py",
+            "--worker",
+            "--input",
+            str(tmp_path / "candidate.py"),
+            "--reference-dir",
+            str(tmp_path / "reference"),
+            "--artifact-dir",
+            str(tmp_path / "artifact"),
+            "--sdk-result-path-output",
+            str(pointer_path),
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_eval_module.main()
+
+    assert exc_info.value.code == 0
+    assert not pointer_path.exists()
+
+
 def test_cli_launch_paths_and_mode_override_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -3923,6 +3923,12 @@ def main() -> None:
     parser.add_argument(
         "--shape-result-output", type=Path, default=None, help=argparse.SUPPRESS
     )
+    parser.add_argument(
+        "--sdk-result-path-output",
+        type=Path,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
     args = parser.parse_args()
     cli_validation_mode = args.validation_mode
 
@@ -4283,6 +4289,11 @@ def main() -> None:
             kernel_name=kernel_name,
             timestamp=timestamp,
         )
+        if args.sdk_result_path_output is not None:
+            _save_text_atomic(
+                str(eval_output_path.resolve()),
+                args.sdk_result_path_output,
+            )
         print(f"[OUTPUT] {eval_output_path}")
         raise SystemExit(0 if _payload_overall_passed(payload) else 1)
 
@@ -4326,6 +4337,11 @@ def main() -> None:
         kernel_name=kernel_name,
         timestamp=timestamp,
     )
+    if args.sdk_result_path_output is not None:
+        _save_text_atomic(
+            str(eval_output_path.resolve()),
+            args.sdk_result_path_output,
+        )
     print(f"[OUTPUT] {eval_output_path}")
     raise SystemExit(0 if _payload_overall_passed(payload) else 1)
 
