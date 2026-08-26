@@ -17,7 +17,7 @@ import threading
 import time
 import traceback
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -88,6 +88,7 @@ _DEFAULT_WARMUP_ITERS = 10
 _DEFAULT_BENCH_ITERS = 100
 _DEFAULT_CANDIDATE_TIMEOUT_S = 60.0
 _DEFAULT_PERF_TIMEOUT_S = 600.0
+_DEFAULT_COMPILE_TIMEOUT_S = 300.0
 _SUBPROCESS_SHUTDOWN_TIMEOUT_S = 5.0
 _DEFAULT_BENCHMARK_MODE = "eager"
 _DEFAULT_CUDA_GRAPH_CACHE_FLUSH_MB = 1024
@@ -123,6 +124,7 @@ _RUNNER_CONFIG_KEYS = frozenset(
         "bench_iters",
         "candidate_timeout_s",
         "perf_timeout_s",
+        "compile_timeout_s",
         "benchmark_mode",
         "cuda_graph_cache_flush_mb",
         "graph_atol",
@@ -166,6 +168,7 @@ _SHAPE_SUBWORKER_STDERR_TAIL_LINES = 15
 
 _SHAPE_WALL_TIMEOUT_FLOOR_S = 60.0
 _REFERENCE_OVERHEAD_BUDGET_S = 60.0
+_WORKER_OVERHEAD_BUDGET_S = 30.0
 
 
 def _derived_shape_wall_timeout_s(
@@ -213,6 +216,53 @@ def _derived_shape_wall_timeout_s(
         + _REFERENCE_OVERHEAD_BUDGET_S
     )
     return max(_SHAPE_WALL_TIMEOUT_FLOOR_S, ceiling)
+
+
+def _derived_worker_wall_timeout_s(
+    reference_dir: Path,
+    *,
+    compile_timeout_s: int | float,
+    candidate_timeout_s: int | float,
+    perf_timeout_s: int | float,
+    num_correctness_cases: int,
+    validation_mode: str = _VALIDATION_MODE_FULL,
+) -> float | None:
+    """OS-level wall-clock ceiling for the WHOLE ``--worker`` subprocess.
+
+    ``_derived_shape_wall_timeout_s`` bounds each shape, but the worker compiles
+    the candidate once before any shape runs and that step is bounded by nothing:
+    a hang inside a JIT extension build escapes every timeout above it, because
+    in-Python SIGALRM cannot interrupt a blocked C extension and no one kills the
+    process from the outside.
+
+        compile                 <= compile_timeout_s
+        every shape             <= shape ceiling * n_shapes
+        worker start/teardown   <= WORKER_OVERHEAD (30s fixed)
+
+    Returns None when ``compile_timeout_s`` is <= 0, matching the convention the
+    other timeouts use for "disabled".
+
+    A shapes.json that cannot be read falls back to one shape's worth of budget
+    rather than refusing to run: this is a backstop, and the pre-flight that
+    properly reports a broken bundle runs later.
+    """
+    if float(compile_timeout_s) <= 0:
+        return None
+    try:
+        shape_count = max(len(_shape_ids(reference_dir)), 1)
+    except Exception:  # noqa: BLE001 - unreadable shapes.json is reported elsewhere
+        shape_count = 1
+    shape_ceiling = _derived_shape_wall_timeout_s(
+        candidate_timeout_s,
+        perf_timeout_s,
+        num_correctness_cases=num_correctness_cases,
+        validation_mode=validation_mode,
+    )
+    return (
+        float(compile_timeout_s)
+        + shape_ceiling * shape_count
+        + _WORKER_OVERHEAD_BUDGET_S
+    )
 
 
 def _log(message: str) -> None:
@@ -595,12 +645,36 @@ def _check_untrusted_integrity(snapshot: dict[str, int]) -> None:
     check_cuda_event_monkey_patch()
 
 
+def _kill_process_group(process: subprocess.Popen) -> None:
+    """SIGKILL the child's whole process group, falling back to the child alone.
+
+    The group, not just the child: a compiler the worker spawned would otherwise
+    reparent and keep running -- and keep holding whatever lock wedged it.
+    """
+    if os.name == "posix":
+        try:
+            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            return
+        except OSError:
+            pass
+    try:
+        process.kill()
+    except OSError:
+        pass
+
+
 def _run_subprocess_with_live_stderr(
     cmd: list[str],
     *,
     cwd: str,
+    timeout_s: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run a subprocess while mirroring its stderr to this process in real time."""
+    """Run a subprocess while mirroring its stderr to this process in real time.
+
+    ``timeout_s`` is an OS-level ceiling; None means wait indefinitely, which is
+    what every caller did before there was one. On expiry the child's whole
+    process group is SIGKILLed and ``subprocess.TimeoutExpired`` propagates.
+    """
     process = subprocess.Popen(
         cmd,
         cwd=cwd,
@@ -610,6 +684,8 @@ def _run_subprocess_with_live_stderr(
         encoding="utf-8",
         errors="replace",
         bufsize=1,
+        # Own process group, so a timeout can take the descendants with it.
+        start_new_session=os.name == "posix",
     )
     stdout_chunks: list[str] = []
     stderr_chunks: list[str] = []
@@ -639,7 +715,12 @@ def _run_subprocess_with_live_stderr(
     stdout_thread.start()
     stderr_thread.start()
     try:
-        returncode = process.wait()
+        returncode = process.wait(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        _kill_process_group(process)
+        stdout_thread.join(timeout=_SUBPROCESS_SHUTDOWN_TIMEOUT_S)
+        stderr_thread.join(timeout=_SUBPROCESS_SHUTDOWN_TIMEOUT_S)
+        raise
     except BaseException:
         cleanup_errors: list[str] = []
         needs_kill = False
@@ -1161,25 +1242,25 @@ def _correctness_to_payload(result: CorrectnessShapeResult) -> dict[str, object]
 
 
 def _correctness_from_payload(payload: dict[str, object]) -> CorrectnessShapeResult:
-    """Reconstruct a CorrectnessShapeResult from the sub-worker JSON payload."""
-    raw_cases = payload.get("cases") or []
+    """Reconstruct a CorrectnessShapeResult from the sub-worker JSON payload.
+
+    Driven by the payload keys rather than a hand-written field list, for the
+    reason spelled out on ``_performance_from_payload``. Covers both levels:
+    the shape result and each case.
+    """
     cases: list[CorrectnessCase] = []
-    for raw_case in raw_cases:
-        outputs = [
+    for raw_case in payload.get("cases") or []:
+        case_values = dict(raw_case)
+        case_values["outputs"] = [
             OutputDiff(**raw_output) for raw_output in (raw_case.get("outputs") or [])
         ]
-        cases.append(
-            CorrectnessCase(
-                input_artifact=raw_case.get("input_artifact"),
-                outputs=outputs,
-                error=raw_case.get("error"),
-            )
-        )
-    return CorrectnessShapeResult(
-        status=str(payload["status"]),
-        reason=payload.get("reason"),
-        cases=cases,
-    )
+        cases.append(CorrectnessCase(**case_values))
+    values = dict(payload)
+    # Keep indexing ``status``: a payload without it is malformed, and KeyError
+    # is one of the errors the callers already handle.
+    values["status"] = str(payload["status"])
+    values["cases"] = cases
+    return CorrectnessShapeResult(**values)
 
 
 def _performance_to_payload(result: PerformanceShapeResult) -> dict[str, object]:
@@ -1188,22 +1269,23 @@ def _performance_to_payload(result: PerformanceShapeResult) -> dict[str, object]
 
 
 def _performance_from_payload(payload: dict[str, object]) -> PerformanceShapeResult:
-    """Reconstruct a PerformanceShapeResult from the sub-worker JSON payload."""
-    samples = [PerformanceSample(**raw) for raw in (payload.get("samples") or [])]
-    kernel_events = [
+    """Reconstruct a PerformanceShapeResult from the sub-worker JSON payload.
+
+    Driven by the payload keys rather than a hand-written field list. The payload
+    is ``asdict`` output, so enumerating fields here means every field added to
+    the dataclass later is silently dropped on the way back from the sub-worker
+    — computed, serialized, then lost, with nothing raised. An unknown key now
+    raises TypeError, which the callers already treat as a malformed payload.
+    """
+    values = dict(payload)
+    values["samples"] = [
+        PerformanceSample(**raw) for raw in (payload.get("samples") or [])
+    ]
+    values["kernel_events"] = [
         KernelTimingEvent(**raw) for raw in (payload.get("kernel_events") or [])
     ]
-    return PerformanceShapeResult(
-        input_artifact=payload.get("input_artifact"),
-        samples=samples,
-        kernel_events=kernel_events,
-        benchmark_mode=str(payload.get("benchmark_mode") or "eager"),
-        capture_time_ms=payload.get("capture_time_ms"),
-        cache_flush_mb=payload.get("cache_flush_mb"),
-        graph_correctness=payload.get("graph_correctness"),
-        error=payload.get("error"),
-        observed_kernels=payload.get("observed_kernels"),
-    )
+    values["benchmark_mode"] = str(payload.get("benchmark_mode") or "eager")
+    return PerformanceShapeResult(**values)
 
 
 def _summarize_subworker_failure(
@@ -1445,6 +1527,22 @@ def _resolve_checkpoint_root(artifact_dir: Path, checkpoint_dir: Path | None) ->
     if checkpoint_dir.is_absolute():
         return checkpoint_dir
     return artifact_dir / checkpoint_dir
+
+
+def _isolate_torch_extension_build_dir(artifact_dir: Path) -> None:
+    """Give this evaluation its own torch cpp_extension build directory.
+
+    Nothing here builds extensions, but candidates do, and torch defaults every
+    build to a shared ``~/.cache/torch_extensions/<name>``. Concurrent
+    evaluations of the same operator then race on one source tree and one build
+    lock, and a single wedged compiler holds that lock while every other build
+    queues behind it. Isolating per evaluation is the only fix available to the
+    side that owns the environment.
+
+    ``setdefault`` so an operator who already pointed this somewhere keeps it.
+    Set in the parent and inherited by the worker and its per-shape children.
+    """
+    os.environ.setdefault("TORCH_EXTENSIONS_DIR", str(artifact_dir / "torch_ext"))
 
 
 # ---------------------------------------------------------------------------
@@ -1763,6 +1861,21 @@ def _run_single_shape_subprocess(
 # ---------------------------------------------------------------------------
 
 
+def _with_observed_kernels(
+    result: PerformanceShapeResult,
+    observed: dict[str, list[str]] | None,
+) -> PerformanceShapeResult:
+    """Return ``result`` with the flydsl tracker payload attached.
+
+    ``replace`` rather than a field-by-field rebuild on purpose: this runs in the
+    sub-worker, just before the result is serialized to the parent, so a field
+    this function forgets to carry is computed, then dropped, with no error
+    anywhere. Every field added to ``PerformanceShapeResult`` later comes along
+    for free.
+    """
+    return replace(result, observed_kernels=observed)
+
+
 def _run_single_shape_main(
     *,
     candidate_path: Path,
@@ -1908,17 +2021,7 @@ def _run_single_shape_main(
     # importable in this sub-worker (non-flydsl candidates).
     if tracker_installed:
         observed = observed_kernel_symbols_serializable()
-        performance_result = PerformanceShapeResult(
-            input_artifact=performance_result.input_artifact,
-            samples=performance_result.samples,
-            kernel_events=performance_result.kernel_events,
-            benchmark_mode=performance_result.benchmark_mode,
-            capture_time_ms=performance_result.capture_time_ms,
-            cache_flush_mb=performance_result.cache_flush_mb,
-            graph_correctness=performance_result.graph_correctness,
-            error=performance_result.error,
-            observed_kernels=observed,
-        )
+        performance_result = _with_observed_kernels(performance_result, observed)
 
     payload = {
         "compile_succeeded": compile_succeeded,
@@ -2598,6 +2701,7 @@ def _run_torch_compile_eval_process(
         timestamp=resolved_timestamp,
     )
     artifact_dir.mkdir(parents=True, exist_ok=True)
+    _isolate_torch_extension_build_dir(artifact_dir)
 
     runner_config = _build_runner_config(
         config_version=config_version,
@@ -2722,6 +2826,7 @@ def _run_eval_process(
     collect_kernel_events: bool = True,
     candidate_timeout_s: int | float = 60,
     perf_timeout_s: int | float = 600,
+    compile_timeout_s: int | float = _DEFAULT_COMPILE_TIMEOUT_S,
     benchmark_mode: str = "eager",
     cuda_graph_cache_flush_mb: int = 1024,
     graph_atol: float = 1e-2,
@@ -2740,6 +2845,7 @@ def _run_eval_process(
         timestamp=resolved_timestamp,
     )
     artifact_dir.mkdir(parents=True, exist_ok=True)
+    _isolate_torch_extension_build_dir(artifact_dir)
 
     runner_config = _build_runner_config(
         config_version=config_version,
@@ -2844,6 +2950,15 @@ def _run_eval_process(
         worker_command=worker_command,
     )
 
+    worker_wall_timeout_s = _derived_worker_wall_timeout_s(
+        reference_dir,
+        compile_timeout_s=compile_timeout_s,
+        candidate_timeout_s=candidate_timeout_s,
+        perf_timeout_s=perf_timeout_s,
+        num_correctness_cases=num_correctness_cases,
+        validation_mode=validation_mode,
+    )
+
     try:
         _log(
             f"[eval] launching worker op={reference_dir.name} "
@@ -2852,7 +2967,21 @@ def _run_eval_process(
         completed = _run_subprocess_with_live_stderr(
             worker_command,
             cwd=str(Path(__file__).resolve().parents[1]),
+            timeout_s=worker_wall_timeout_s,
         )
+    except subprocess.TimeoutExpired:
+        # The worker outlived its whole budget, so the compile stage is the only
+        # thing left that could still be running: every later stage is bounded by
+        # a per-shape ceiling of its own. Say so, instead of attaching a bare
+        # TimeoutExpired traceback.
+        failure_payload = _annotate_failure_payload(
+            _load_saved_payload(eval_output_path) or initial_payload,
+            f"Worker exceeded {worker_wall_timeout_s}s wall-clock budget "
+            f"(compile <= {compile_timeout_s}s plus a per-shape ceiling for each "
+            "shape); process group OS-killed (SIGKILL).",
+        )
+        _save_eval_json(failure_payload, eval_output_path)
+        return failure_payload
     except Exception:
         failure_payload = _annotate_failure_payload(
             _load_saved_payload(eval_output_path) or initial_payload,
@@ -2906,6 +3035,23 @@ def _public_clock_lock_config(
     return config
 
 
+def _visible_device_uuid() -> str | None:
+    """UUID of the GPU this process actually runs on, or None if unknowable.
+
+    Lives here rather than in clock_lock so that module stays free of torch and
+    keeps its promise to resolve a selector without initializing CUDA. Best
+    effort by design: no CUDA, ROCm, or a build that does not expose a UUID all
+    return None, which turns the cross-check into a no-op rather than a failure.
+    """
+    try:
+        if not torch.cuda.is_available():
+            return None
+        properties = torch.cuda.get_device_properties(torch.cuda.current_device())
+    except Exception:  # noqa: BLE001 - a diagnostic must never fail the run
+        return None
+    return str(getattr(properties, "uuid", "") or "") or None
+
+
 def _build_managed_clock_session(
     *,
     config: ClockLockConfig,
@@ -2915,6 +3061,7 @@ def _build_managed_clock_session(
     return ManagedClockLock(
         config=config,
         nvidia_smi=NvidiaSmi(timeout_s=config.command_timeout_seconds),
+        visible_device_uuid=_visible_device_uuid,
         monitor_factory=lambda device, monitor_config: NvidiaClockMonitor(
             device_uuid=device.uuid,
             target_mhz=monitor_config.graphics_mhz,
@@ -3118,6 +3265,7 @@ def run_eval(
     collect_kernel_events: bool = True,
     candidate_timeout_s: int | float = 60,
     perf_timeout_s: int | float = 600,
+    compile_timeout_s: int | float = _DEFAULT_COMPILE_TIMEOUT_S,
     benchmark_mode: str = "eager",
     cuda_graph_cache_flush_mb: int = 1024,
     graph_atol: float = 1e-2,
@@ -3193,6 +3341,7 @@ def run_eval(
             collect_kernel_events=collect_kernel_events,
             candidate_timeout_s=candidate_timeout_s,
             perf_timeout_s=perf_timeout_s,
+            compile_timeout_s=compile_timeout_s,
             benchmark_mode=benchmark_mode,
             cuda_graph_cache_flush_mb=cuda_graph_cache_flush_mb,
             graph_atol=graph_atol,
@@ -3363,13 +3512,28 @@ def main() -> None:
         "--warmup-iters",
         type=int,
         default=None,
-        help="Warmup iterations for profiling",
+        help=(
+            "Warmup budget. In eager mode this is a DURATION IN MILLISECONDS, "
+            "not a count: it is triton do_bench's `warmup`, documented there as "
+            "'Warmup time (in ms)'. In cuda_graph_replay mode it is a count of "
+            "replays. The name predates the distinction and is kept for "
+            "compatibility."
+        ),
     )
     parser.add_argument(
         "--bench-iters",
         type=int,
         default=None,
-        help="Benchmark iterations for profiling",
+        help=(
+            "Benchmark budget. In eager mode this is a DURATION IN MILLISECONDS, "
+            "not a count: it is triton do_bench's `rep`, documented there as "
+            "'Repetition time (in ms)'. So --bench-iters 100 means 'keep timing "
+            "for about 100ms', which is thousands of runs for a fast kernel and "
+            "possibly one for a slow one. In cuda_graph_replay mode it IS a "
+            "count of replays. The name predates the distinction and is kept "
+            "for compatibility; the number of iterations actually achieved is "
+            "the length of the samples list in eval_result.json."
+        ),
     )
     parser.add_argument(
         "--checkpoint-dir",
@@ -3502,6 +3666,19 @@ def main() -> None:
             "instantiate (flydsl @kernel AOT compile) AND every individual "
             "correctness forward call. Reference is not timed out. Pass <= 0 "
             "to disable. Default 60s."
+        ),
+    )
+    parser.add_argument(
+        "--compile-timeout-s",
+        type=float,
+        default=None,
+        help=(
+            "Budget (seconds) for the candidate's compile stage, which runs once "
+            "before any shape. It is charged into an OS-level wall-clock ceiling "
+            "on the whole worker process, whose group is SIGKILLed on expiry -- "
+            "the only thing that stops a hang inside a JIT extension build, "
+            "which in-Python timeouts cannot interrupt. Pass <= 0 to run the "
+            "worker with no wall ceiling. Default 300s."
         ),
     )
     parser.add_argument(
@@ -3714,6 +3891,14 @@ def main() -> None:
             cli_value=args.perf_timeout_s,
             config=runner_file_config,
             default=_DEFAULT_PERF_TIMEOUT_S,
+        )
+    )
+    args.compile_timeout_s = float(
+        _resolve_runner_option(
+            "compile_timeout_s",
+            cli_value=args.compile_timeout_s,
+            config=runner_file_config,
+            default=_DEFAULT_COMPILE_TIMEOUT_S,
         )
     )
     args.benchmark_mode = str(
@@ -3974,6 +4159,7 @@ def main() -> None:
         collect_kernel_events=not args.skip_kernel_attribution,
         candidate_timeout_s=args.candidate_timeout_s,
         perf_timeout_s=args.perf_timeout_s,
+        compile_timeout_s=args.compile_timeout_s,
         benchmark_mode=args.benchmark_mode,
         cuda_graph_cache_flush_mb=args.cuda_graph_cache_flush_mb,
         graph_atol=args.graph_atol,

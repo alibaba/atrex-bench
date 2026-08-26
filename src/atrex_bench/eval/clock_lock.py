@@ -291,6 +291,7 @@ class ManagedClockLock:
         report_callback: Callable[[ClockLockReport], None] = lambda _report: None,
         lock_directory: Path = Path(tempfile.gettempdir()),
         getpid: Callable[[], int] = os.getpid,
+        visible_device_uuid: Callable[[], str | None] | None = None,
     ) -> None:
         if config.mode != "manage":
             raise ValueError("ManagedClockLock requires clock_lock_mode=manage")
@@ -302,6 +303,7 @@ class ManagedClockLock:
         self._report_callback = report_callback
         self._lock_directory = lock_directory
         self._getpid = getpid
+        self._visible_device_uuid = visible_device_uuid
         self._lock_handle = None
         self._device: NvidiaDevice | None = None
         self._graphics_applied = False
@@ -377,6 +379,44 @@ class ManagedClockLock:
                 f"observed {snapshot.memory_mhz} MHz"
             )
 
+    @staticmethod
+    def _normalized_uuid(value: str) -> str:
+        """Compare UUIDs without caring about the ``GPU-`` prefix or case."""
+        text = value.strip().lower()
+        if text.startswith("gpu-"):
+            text = text[len("gpu-") :]
+        return text
+
+    def _verify_device_is_the_visible_one(self, device: NvidiaDevice) -> None:
+        """Refuse to lock a GPU other than the one this process runs on.
+
+        A numeric selector is a PHYSICAL nvidia-smi index, but under
+        ``CUDA_VISIBLE_DEVICES`` a process sees a remapped ordinal: a caller
+        that passes the index its runtime reported ends up pinning a different
+        card, which on a shared node belongs to somebody else. Nothing
+        downstream can notice -- the clocks come back verified, for the wrong
+        GPU.
+
+        UUIDs are the one identifier both sides agree on, and the provider is
+        injected so this module keeps its promise not to initialize CUDA.
+        Skipped when no provider is given or it cannot name a device (no CUDA,
+        ROCm, or a runtime that does not expose a UUID).
+        """
+        if self._visible_device_uuid is None:
+            return
+        visible = self._visible_device_uuid()
+        if not visible:
+            return
+        if self._normalized_uuid(visible) == self._normalized_uuid(device.uuid):
+            return
+        raise ClockLockError(
+            f"Refusing to lock clocks on {device.uuid} (selector "
+            f"{device.selector!r}): this process runs on {visible}. A numeric "
+            "selector is a physical nvidia-smi index, not the visible ordinal "
+            "-- pass the GPU UUID, or omit the selector and let "
+            "CUDA_VISIBLE_DEVICES decide."
+        )
+
     def __enter__(self) -> ManagedClockLock:
         try:
             self._install_sigterm_handler()
@@ -387,6 +427,7 @@ class ManagedClockLock:
                 nvidia_smi=self._nvidia_smi,
             )
             device = self._nvidia_smi.resolve_device(selector)
+            self._verify_device_is_the_visible_one(device)
             self._device = device
             self._publish(device=device)
             self._acquire_process_lock(device)

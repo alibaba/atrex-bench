@@ -38,11 +38,17 @@ own ``ratio`` to the top-level average and shapes are weighted equally.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from statistics import median
 
 from atrex_bench.eval._flydsl_tracker import symbols_from_serialized
-from atrex_bench.eval.performance import KernelTimingEvent, PerformanceShapeResult
+from atrex_bench.eval.performance import (
+    KernelTimingEvent,
+    PerformanceSample,
+    PerformanceShapeResult,
+)
 
 
 @dataclass(frozen=True)
@@ -68,8 +74,8 @@ class FlydslComputeRatioShape:
       * ``flydsl_device_time_us`` -- per-forward sum of GPU device time
         across kernels registered through flydsl's ``@kernel`` (runtime
         tracker observation; profiler-measured).
-      * ``total_e2e_time_us`` -- per-forward end-to-end wall time, taken
-        from ``samples[0].end_to_end_time_ms`` (do_bench timing). Same
+      * ``total_e2e_time_us`` -- per-forward end-to-end wall time, the median
+        of the shape's ``end_to_end_time_ms`` samples (do_bench timing). Same
         denominator used everywhere else for timing comparisons, so
         ``ratio`` is comparable across candidates and shapes.
       * ``kernel_breakdown`` -- per-kernel ``KernelAttribution`` rows sorted
@@ -110,6 +116,24 @@ def _is_flydsl_event(
 # ---------------------------------------------------------------------------
 # Per-shape attribution
 # ---------------------------------------------------------------------------
+
+
+def _representative_e2e_ms(samples: Sequence[PerformanceSample]) -> float | None:
+    """Median end-to-end forward time across a shape's performance samples.
+
+    Median rather than ``samples[0]``: indexing only worked because the eager
+    path emitted a single pre-reduced value, and the first of several
+    per-iteration samples is the coldest one, not the typical one. This is the
+    same reduction the report layer applies.
+    """
+    values = [
+        float(sample.end_to_end_time_ms)
+        for sample in samples
+        if sample.end_to_end_time_ms is not None
+    ]
+    if not values:
+        return None
+    return float(median(values))
 
 
 def compute_flydsl_compute_ratio_for_shape(
@@ -179,7 +203,7 @@ def compute_flydsl_compute_ratio_for_shape(
     # calls to get per-forward time comparable to the e2e denominator.
     # Ratio thus = "fraction of candidate wall time spent inside flydsl
     # @kernel GPU work", which is the reward-hacking signal we care about.
-    e2e_ms = performance_result.samples[0].end_to_end_time_ms
+    e2e_ms = _representative_e2e_ms(performance_result.samples)
     if e2e_ms is None or e2e_ms <= 0.0:
         return FlydslComputeRatioShape(
             ratio=None,

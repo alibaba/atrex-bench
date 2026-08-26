@@ -66,7 +66,30 @@ class LoadedModelModule:
 
 
 _MODULE_COUNTER = itertools.count()
-_TARGET_DSLS = ("triton", "gluon", "flydsl", "cutedsl")
+# A DSL's import path is not its name. Matching the bare name meant CuteDSL and
+# Gluon could never identify themselves: `import cutlass.cute` scored nothing for
+# "cutedsl", and `import triton.experimental.gluon` scored for "triton" (prefix
+# hit) and nothing for "gluon". Attribution takes the LONGEST matching prefix, so
+# Gluon wins over Triton on its own imports.
+_DSL_IMPORT_PREFIXES: dict[str, tuple[str, ...]] = {
+    "triton": ("triton",),
+    "gluon": ("triton.experimental.gluon",),
+    "flydsl": ("flydsl",),
+    "cutedsl": ("cutlass.cute", "cutlass"),
+}
+_TARGET_DSLS = tuple(_DSL_IMPORT_PREFIXES)  # derived, so the two cannot drift
+
+# Decorators that DEFINE a kernel in each DSL. A definition is much stronger
+# evidence than an import, which may be incidental or aliased away.
+_DSL_DEFINITION_TOKENS: dict[str, tuple[str, ...]] = {
+    "triton": ("@triton.jit",),
+    "gluon": ("@gluon.jit",),
+    "flydsl": ("@flydsl.",),
+    "cutedsl": ("@cute.kernel", "@cute.jit"),
+}
+
+_IMPORT_POINTS = 3
+_DEFINITION_POINTS = 4
 _CORE_PACKAGE_NAMES = (
     "torch",
     "triton",
@@ -112,6 +135,24 @@ def get_core_package_versions() -> dict[str, str]:
     return versions
 
 
+def _dsl_for_module(module: str) -> str | None:
+    """Attribute an imported module to a DSL by its longest matching prefix.
+
+    Longest wins because the prefixes nest: ``triton.experimental.gluon`` is
+    Gluon, not Triton, and ``cutlass.cute`` is CuteDSL rather than bare CUTLASS.
+    """
+    best: str | None = None
+    best_length = -1
+    for dsl, prefixes in _DSL_IMPORT_PREFIXES.items():
+        for prefix in prefixes:
+            if module != prefix and not module.startswith(f"{prefix}."):
+                continue
+            if len(prefix) > best_length:
+                best = dsl
+                best_length = len(prefix)
+    return best
+
+
 def _score_dsl_mentions_from_source(source: str) -> dict[str, int]:
     """Score DSL mentions from source using AST first and raw-text fallback."""
     scores = {dsl: 0 for dsl in _TARGET_DSLS}
@@ -122,23 +163,36 @@ def _score_dsl_mentions_from_source(source: str) -> dict[str, int]:
         tree = None
 
     if tree is not None:
+        # Presence, not occurrence count: a candidate that imports triton five
+        # times is not five times more Triton than one that imports
+        # cutlass.cute once.
+        imported: set[str] = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    for dsl in _TARGET_DSLS:
-                        if alias.name == dsl or alias.name.startswith(f"{dsl}."):
-                            scores[dsl] += 3
+                    dsl = _dsl_for_module(alias.name)
+                    if dsl is not None:
+                        imported.add(dsl)
             elif isinstance(node, ast.ImportFrom) and node.module:
-                for dsl in _TARGET_DSLS:
-                    if node.module == dsl or node.module.startswith(f"{dsl}."):
-                        scores[dsl] += 3
+                dsl = _dsl_for_module(node.module)
+                if dsl is not None:
+                    imported.add(dsl)
+        for dsl in imported:
+            scores[dsl] += _IMPORT_POINTS
 
     lowered = source.lower()
     for dsl in _TARGET_DSLS:
+        # Bare-name text scan: the only signal left when the source does not
+        # parse, and the way a candidate importing the DSL by its own name is
+        # still recognised.
         if re.search(rf"(^|\n)\s*(from|import)\s+{dsl}\b", lowered, re.MULTILINE):
             scores[dsl] += 1
         if f"@{dsl}." in lowered:
             scores[dsl] += 1
+        for token in _DSL_DEFINITION_TOKENS.get(dsl, ()):
+            if token in lowered:
+                scores[dsl] += _DEFINITION_POINTS
+                break
 
     return scores
 
@@ -151,10 +205,20 @@ def infer_target_dsl(generated_path: Path) -> str:
         return "unknown"
 
     scores = _score_dsl_mentions_from_source(source)
-    matched_dsls = [dsl for dsl, score in scores.items() if score > 0]
-    if len(matched_dsls) == 1:
-        return matched_dsls[0]
-    if "flydsl" in matched_dsls:
+    matched = [(score, dsl) for dsl, score in scores.items() if score > 0]
+    if not matched:
+        return "unknown"
+
+    # Rank by score. Until now every nonzero score was treated alike, so the
+    # weights above were inert and any second match fell through to the flydsl
+    # preference or to unknown; a candidate that imports triton incidentally and
+    # defines a @cute.kernel is CuteDSL, and now says so.
+    top_score = max(score for score, _ in matched)
+    leaders = sorted(dsl for score, dsl in matched if score == top_score)
+    if len(leaders) == 1:
+        return leaders[0]
+    # A genuine tie keeps the previous behaviour: flydsl wins, else unknown.
+    if "flydsl" in leaders:
         return "flydsl"
     return "unknown"
 

@@ -49,10 +49,11 @@ Constraints:
 | `--rtol` | float | `0.05` | Relative tolerance for correctness checks. |
 | `--correctness-max-rel-l2` | float | Unset | When set, applies a global relative L2 threshold to floating-point outputs. |
 | `--num-correctness-cases` | int | `1` | Number of correctness cases per shape. |
-| `--warmup-iters` | int | `10` | Performance warmup budget. |
-| `--bench-iters` | int | `100` | Performance benchmark budget. |
+| `--warmup-iters` | int | `10` | Performance warmup budget. **In `eager` mode, the unit is milliseconds, not iterations** (the `warmup` argument to Triton's `do_bench`, documented as "Warmup time (in ms)"). In `cuda_graph_replay` mode, it is the number of replays. |
+| `--bench-iters` | int | `100` | Performance benchmark budget. **In `eager` mode, the unit is milliseconds, not iterations** (the `rep` argument to `do_bench`, documented as "Repetition time (in ms)"). Thus, `--bench-iters 100` requests approximately 100 ms of measurement: a fast kernel may run thousands of times, while a slow kernel may run only once. The length of `samples` in `eval_result.json` gives the recorded sample count. In `cuda_graph_replay` mode, this option is the number of replays. The option name predates this distinction and is retained for compatibility. |
 | `--candidate-timeout-s` | float | `60` | Timeout in seconds for candidate import, instantiation, and each correctness forward call; `<=0` disables it. |
 | `--perf-timeout-s` | float | `600` | Timeout in seconds for the entire performance stage of each shape; `<=0` disables it. |
+| `--compile-timeout-s` | float | `300` | Candidate compilation budget in seconds. Compilation runs once before all shapes. This budget and the per-shape limits together bound the worker's wall-clock time. On timeout, the entire **process group** receives SIGKILL so that compiler processes cannot retain locks after being reparented. `<=0` disables the wall-clock limit. |
 | `--trust-mode` | enum | `trusted` | Allowed values: `trusted`, `untrusted`. |
 | `--skip-kernel-attribution` | bool flag | `false` | Skips kernel attribution and `flydsl_compute_ratio`. |
 

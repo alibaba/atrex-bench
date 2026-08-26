@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -278,6 +279,156 @@ def test_run_eval_serializes_cuda_graph_metadata() -> None:
         "passed": True,
         "outputs": [],
     }
+
+
+def test_observed_kernels_attachment_carries_every_field() -> None:
+    """Attaching the flydsl tracker payload must not drop other fields.
+
+    The sub-worker used to hand-copy every field here, so a field added to
+    ``PerformanceShapeResult`` later was computed, then dropped on the way to
+    the parent, with no error anywhere. The dataclass is introspected rather
+    than spelled out so this stays honest as fields are added.
+    """
+    from dataclasses import fields
+
+    from scripts import run_eval as run_eval_module
+
+    populated = run_eval_module.PerformanceShapeResult(
+        input_artifact={"0": "input.pt"},
+        samples=[run_eval_module.PerformanceSample(end_to_end_time_ms=1.5)],
+        kernel_events=[
+            run_eval_module.KernelTimingEvent(
+                name="kernel", device_time_us=2.0, calls=3
+            )
+        ],
+        benchmark_mode="cuda_graph_replay",
+        capture_time_ms=4.25,
+        cache_flush_mb=1024,
+        graph_correctness={"passed": True, "outputs": []},
+        error="boom",
+    )
+
+    attached = run_eval_module._with_observed_kernels(populated, {"flydsl": ["k"]})
+
+    assert attached.observed_kernels == {"flydsl": ["k"]}
+    carried = [f.name for f in fields(populated) if f.name != "observed_kernels"]
+    assert carried
+    for name in carried:
+        assert getattr(attached, name) == getattr(populated, name), name
+
+
+def test_performance_payload_round_trip_keeps_every_field() -> None:
+    """A performance result must survive the sub-worker JSON channel intact.
+
+    ``_performance_to_payload`` is ``asdict``, so the decoder used to have to
+    name every field; one it did not name was computed, serialized, and then
+    dropped on the way back, with no error anywhere.
+    """
+    from scripts import run_eval as run_eval_module
+
+    original = run_eval_module.PerformanceShapeResult(
+        input_artifact={"0": "input.pt"},
+        samples=[run_eval_module.PerformanceSample(end_to_end_time_ms=1.5)],
+        kernel_events=[
+            run_eval_module.KernelTimingEvent(
+                name="kernel", device_time_us=2.0, calls=3
+            )
+        ],
+        benchmark_mode="cuda_graph_replay",
+        capture_time_ms=4.25,
+        cache_flush_mb=1024,
+        graph_correctness={"passed": True, "outputs": []},
+        error="boom",
+        observed_kernels={"flydsl": ["k"]},
+    )
+
+    restored = run_eval_module._performance_from_payload(
+        run_eval_module._performance_to_payload(original)
+    )
+
+    assert restored == original
+
+
+def test_correctness_payload_round_trip_keeps_every_field() -> None:
+    """Same for the correctness half, at both the shape and the case level."""
+    from scripts import run_eval as run_eval_module
+
+    original = run_eval_module.CorrectnessShapeResult(
+        status="failed",
+        reason="mismatch",
+        cases=[
+            run_eval_module.CorrectnessCase(
+                input_artifact={"0": "input.pt"},
+                outputs=[
+                    run_eval_module.OutputDiff(
+                        name="out",
+                        passed=False,
+                        max_elementwise_abs_diff=0.5,
+                        max_elementwise_rel_diff=0.25,
+                        relative_l2=0.125,
+                    )
+                ],
+                error="boom",
+            )
+        ],
+    )
+
+    restored = run_eval_module._correctness_from_payload(
+        run_eval_module._correctness_to_payload(original)
+    )
+
+    assert restored == original
+
+
+def test_performance_payload_rejects_unknown_keys() -> None:
+    """A key with no matching field must raise, not be silently ignored.
+
+    Both call sites catch ``(KeyError, TypeError, ValueError)`` and synthesize a
+    failed shape, so TypeError is the contract here.
+    """
+    from scripts import run_eval as run_eval_module
+
+    payload = run_eval_module._performance_to_payload(
+        run_eval_module.PerformanceShapeResult()
+    )
+    payload["field_from_a_newer_worker"] = 1
+
+    with pytest.raises(TypeError):
+        run_eval_module._performance_from_payload(payload)
+
+
+def test_torch_extension_build_dir_is_isolated_per_evaluation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each evaluation gets its own cpp_extension build dir.
+
+    Candidates that JIT-build extensions otherwise share one cache directory and
+    one build lock across concurrent evaluations, where a single wedged compiler
+    blocks every other build.
+    """
+    from scripts import run_eval as run_eval_module
+
+    monkeypatch.delenv("TORCH_EXTENSIONS_DIR", raising=False)
+    artifact_dir = tmp_path / "20260804-000000" / "op"
+
+    run_eval_module._isolate_torch_extension_build_dir(artifact_dir)
+
+    assert os.environ["TORCH_EXTENSIONS_DIR"] == str(artifact_dir / "torch_ext")
+
+
+def test_torch_extension_build_dir_respects_an_existing_setting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An operator who already pointed this somewhere keeps their choice."""
+    from scripts import run_eval as run_eval_module
+
+    monkeypatch.setenv("TORCH_EXTENSIONS_DIR", "/somewhere/chosen")
+
+    run_eval_module._isolate_torch_extension_build_dir(tmp_path / "op")
+
+    assert os.environ["TORCH_EXTENSIONS_DIR"] == "/somewhere/chosen"
 
 
 def test_runner_config_records_cuda_graph_mode() -> None:
@@ -2626,6 +2777,124 @@ def test_eval_id_is_stable_within_a_single_eval(tmp_path: Path) -> None:
     saved = json.loads(saved_path.read_text(encoding="utf-8"))
     assert saved["eval_id"] == result["eval_id"]
     assert "timestamp" not in saved
+
+
+# ---------------------------------------------------------------------------
+# Worker wall-clock timeout: the compile stage (OS-level SIGKILL, process group)
+# ---------------------------------------------------------------------------
+
+
+def _write_shapes(tmp_path: Path, count: int) -> Path:
+    reference_dir = tmp_path / "op"
+    reference_dir.mkdir(parents=True, exist_ok=True)
+    (reference_dir / "shapes.json").write_text(
+        json.dumps({str(i): {} for i in range(count)}), encoding="utf-8"
+    )
+    return reference_dir
+
+
+def test_derived_worker_wall_timeout_covers_compile_plus_every_shape(
+    tmp_path: Path,
+) -> None:
+    """The worker ceiling has to cover the one stage no per-shape budget does.
+
+    compile runs once, before any shape, and used to be bounded by nothing.
+    """
+    from scripts.run_eval import (
+        _derived_shape_wall_timeout_s,
+        _derived_worker_wall_timeout_s,
+    )
+
+    reference_dir = _write_shapes(tmp_path, 3)
+    shape_ceiling = _derived_shape_wall_timeout_s(
+        candidate_timeout_s=60,
+        perf_timeout_s=600,
+        num_correctness_cases=5,
+    )
+
+    ceiling = _derived_worker_wall_timeout_s(
+        reference_dir,
+        compile_timeout_s=300,
+        candidate_timeout_s=60,
+        perf_timeout_s=600,
+        num_correctness_cases=5,
+    )
+
+    # compile(300) + 3 shapes * 1020 + worker overhead(30)
+    assert ceiling == 300 + shape_ceiling * 3 + 30
+
+
+def test_derived_worker_wall_timeout_is_disabled_by_a_non_positive_budget(
+    tmp_path: Path,
+) -> None:
+    """<= 0 means "no ceiling", the convention the other timeouts already use."""
+    from scripts.run_eval import _derived_worker_wall_timeout_s
+
+    assert (
+        _derived_worker_wall_timeout_s(
+            _write_shapes(tmp_path, 1),
+            compile_timeout_s=0,
+            candidate_timeout_s=60,
+            perf_timeout_s=600,
+            num_correctness_cases=1,
+        )
+        is None
+    )
+
+
+def test_derived_worker_wall_timeout_survives_an_unreadable_shapes_json(
+    tmp_path: Path,
+) -> None:
+    """A backstop must not be the thing that refuses to run."""
+    from scripts.run_eval import _derived_worker_wall_timeout_s
+
+    ceiling = _derived_worker_wall_timeout_s(
+        tmp_path / "missing",
+        compile_timeout_s=300,
+        candidate_timeout_s=60,
+        perf_timeout_s=600,
+        num_correctness_cases=1,
+    )
+
+    assert ceiling is not None and ceiling > 300
+
+
+def test_worker_subprocess_is_killed_when_it_outlives_its_budget() -> None:
+    """A wedged worker is OS-killed rather than waited on forever."""
+    from scripts.run_eval import _run_subprocess_with_live_stderr
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        _run_subprocess_with_live_stderr(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            cwd=str(Path(__file__).resolve().parents[1]),
+            timeout_s=0.5,
+        )
+
+
+def test_worker_timeout_kills_the_process_group_not_just_the_child(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The group, so a compiler the worker spawned cannot reparent and survive.
+
+    That reparenting is what let one wedged compiler keep holding a build lock
+    long after the evaluation that started it was gone.
+    """
+    from scripts import run_eval as run_eval_module
+
+    killed: list[int] = []
+    monkeypatch.setattr(
+        run_eval_module.os, "killpg", lambda pgid, _sig: killed.append(pgid)
+    )
+    monkeypatch.setattr(run_eval_module.os, "getpgid", lambda pid: pid)
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_eval_module._run_subprocess_with_live_stderr(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            cwd=str(Path(__file__).resolve().parents[1]),
+            timeout_s=0.5,
+        )
+
+    assert killed, "expected the child's process group to be signalled"
 
 
 # ---------------------------------------------------------------------------

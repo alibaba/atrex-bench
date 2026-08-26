@@ -44,6 +44,11 @@ from atrex_bench.eval.correctness import (
 # the device timeline before the forward starts).
 _MODEL_FORWARD_LABEL = "atrex_bench_model_forward"
 
+# NVTX range name external profilers filter on, e.g.
+# ``ncu --nvtx --nvtx-include "atrex_forward/"``. The record_function label
+# above only reaches torch's own profiler; ncu and nsys cannot see it.
+_NVTX_FORWARD_RANGE = "atrex_forward"
+
 _DEFAULT_CANDIDATE_TIMEOUT_S = 60
 EAGER_BENCHMARK_MODE = "eager"
 CUDA_GRAPH_REPLAY_BENCHMARK_MODE = "cuda_graph_replay"
@@ -53,6 +58,22 @@ SUPPORTED_BENCHMARK_MODES = frozenset(
         CUDA_GRAPH_REPLAY_BENCHMARK_MODE,
     }
 )
+
+
+def _forward_nvtx() -> contextlib.AbstractContextManager:
+    """Context manager pushing an NVTX range around the timed candidate forward.
+
+    A no-op, and cheap, when CUDA is unavailable or NVTX is not present (e.g.
+    ROCm, where scoping is done with rocprof instead). Pushing a range costs
+    nothing measurable when no profiler is attached, so this is always on
+    rather than gated behind a flag the caller would have to know to set.
+    """
+    if torch.cuda.is_available():
+        try:
+            return torch.cuda.nvtx.range(_NVTX_FORWARD_RANGE)
+        except Exception:  # noqa: BLE001 - NVTX missing must not perturb the run
+            pass
+    return contextlib.nullcontext()
 
 
 @dataclass(frozen=True)
@@ -240,6 +261,30 @@ _PROFILER_BREAKDOWN_ITERS = 5
 _DEFAULT_PERF_TIMEOUT_S = 600.0
 
 
+def _bench_all_runs(do_bench, bench_fn, *, warmup_iters: int, bench_iters: int) -> list[float]:
+    """Per-iteration times from ``do_bench``, or [] if this build cannot report them.
+
+    ``return_mode="all"`` only changes how do_bench reduces: it measures every
+    iteration either way and was discarding the individual values. Older triton
+    builds do not accept the argument, and raise before running anything, so the
+    caller can fall back without having paid for a benchmark.
+    """
+    try:
+        raw = do_bench(
+            bench_fn,
+            warmup=warmup_iters,
+            rep=bench_iters,
+            return_mode="all",
+        )
+    except TypeError:
+        return []
+    if isinstance(raw, (list, tuple)):
+        return [float(value) for value in raw]
+    if torch.is_tensor(raw):
+        return [float(value) for value in raw.flatten().tolist()]
+    return []
+
+
 def _measure_eager_samples(
     *,
     bench_fn,
@@ -266,6 +311,22 @@ def _measure_eager_samples(
             samples=[PerformanceSample(end_to_end_time_ms=elapsed_ms)]
         )
 
+    raw_times = _bench_all_runs(
+        do_bench,
+        bench_fn,
+        warmup_iters=warmup_iters,
+        bench_iters=bench_iters,
+    )
+    if raw_times:
+        return _MeasurementResult(
+            samples=[
+                PerformanceSample(end_to_end_time_ms=value) for value in raw_times
+            ]
+        )
+
+    # Triton too old to report per-iteration times: keep the reduced value
+    # rather than fail. Consumers reduce the list anyway, so one entry is a
+    # degraded result, not a broken one.
     elapsed_ms = do_bench(
         bench_fn,
         warmup=warmup_iters,
@@ -508,7 +569,13 @@ def _measure_runner_samples(
     benchmark_inputs = clone_model_inputs(inputs)
 
     def _bench_fn():
-        return model(*benchmark_inputs.args, **benchmark_inputs.kwargs)
+        # Scope the timed forward in an NVTX range so an external profiler can
+        # capture EXACTLY it, excluding compile, correctness and harness
+        # kernels. Without this, ncu either captures only the first launch --
+        # for a freshly imported candidate usually a compilation artifact --
+        # or captures everything, which is unbounded.
+        with _forward_nvtx():
+            return model(*benchmark_inputs.args, **benchmark_inputs.kwargs)
 
     with torch.inference_mode(), candidate_timeout(perf_timeout_s):
         if benchmark_mode == CUDA_GRAPH_REPLAY_BENCHMARK_MODE:

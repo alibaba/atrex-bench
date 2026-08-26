@@ -104,6 +104,113 @@ def test_measure_runner_dispatches_cuda_graph_mode(monkeypatch) -> None:
     assert calls == ["cuda_graph_replay"]
 
 
+def test_bench_fn_returns_the_forward_output(monkeypatch) -> None:
+    """The timed closure must hand back what the forward returned.
+
+    ``_measure_cuda_graph_samples`` captures and compares that value, so
+    wrapping the forward -- as the NVTX range does -- must not swallow it.
+    """
+    captured: dict[str, object] = {}
+    expected = performance_module._MeasurementResult(
+        samples=[PerformanceSample(end_to_end_time_ms=1.25)],
+    )
+
+    def _fake_cuda_graph(**kwargs):
+        captured["bench_fn"] = kwargs["bench_fn"]
+        return expected
+
+    monkeypatch.setattr(
+        performance_module, "_measure_cuda_graph_samples", _fake_cuda_graph
+    )
+    monkeypatch.setattr(performance_module, "clone_model_inputs", lambda value: value)
+
+    sentinel = torch.ones(3)
+    performance_module._measure_runner_samples(
+        torch.nn.Identity(),
+        SimpleNamespace(args=(sentinel,), kwargs={}),
+        torch.device("cuda"),
+        warmup_iters=1,
+        bench_iters=2,
+        benchmark_mode="cuda_graph_replay",
+    )
+
+    assert torch.equal(captured["bench_fn"](), sentinel)
+
+
+def test_eager_mode_keeps_every_iteration(monkeypatch) -> None:
+    """do_bench measures each iteration; eager must not throw them away.
+
+    The cuda_graph path already emits one sample per iteration, and
+    PerformanceSample documents the list as iteration-ordered.
+    """
+    recorded: dict[str, object] = {}
+
+    def _fake_do_bench(_fn, *, warmup, rep, return_mode=None):
+        recorded["return_mode"] = return_mode
+        return [1.0, 2.0, 3.0]
+
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "triton.testing",
+        SimpleNamespace(do_bench=_fake_do_bench),
+    )
+
+    result = performance_module._measure_eager_samples(
+        bench_fn=lambda: None,
+        device=torch.device("cpu"),
+        warmup_iters=1,
+        bench_iters=3,
+    )
+
+    assert recorded["return_mode"] == "all"
+    assert [s.end_to_end_time_ms for s in result.samples] == [1.0, 2.0, 3.0]
+
+
+def test_eager_mode_falls_back_when_triton_cannot_report_each_run(monkeypatch) -> None:
+    """An older do_bench rejects return_mode; keep the reduced value, do not fail."""
+
+    def _old_do_bench(_fn, *, warmup, rep, **kwargs):
+        if kwargs:
+            raise TypeError("do_bench() got an unexpected keyword argument")
+        return 4.5
+
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "triton.testing",
+        SimpleNamespace(do_bench=_old_do_bench),
+    )
+
+    result = performance_module._measure_eager_samples(
+        bench_fn=lambda: None,
+        device=torch.device("cpu"),
+        warmup_iters=1,
+        bench_iters=3,
+    )
+
+    assert [s.end_to_end_time_ms for s in result.samples] == [4.5]
+
+
+def test_forward_nvtx_is_a_noop_without_cuda(monkeypatch) -> None:
+    """No CUDA means no NVTX range, and no failure either."""
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+
+    with performance_module._forward_nvtx():
+        pass
+
+
+def test_forward_nvtx_survives_a_missing_nvtx_backend(monkeypatch) -> None:
+    """A build without NVTX must degrade to a no-op, not fail the measurement."""
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+
+    def _unavailable(_name):
+        raise RuntimeError("NVTX is not available in this build")
+
+    monkeypatch.setattr(torch.cuda.nvtx, "range", _unavailable)
+
+    with performance_module._forward_nvtx():
+        pass
+
+
 def test_cuda_graph_measurement_captures_once_and_replays(monkeypatch) -> None:
     calls = {"forward": 0, "replay": 0, "flush": 0}
 

@@ -528,6 +528,70 @@ class FakeClockMonitor:
         return self.measurement
 
 
+def _managed_lock(tmp_path, smi, **kwargs) -> ManagedClockLock:
+    return ManagedClockLock(
+        config=ClockLockConfig(
+            mode="manage",
+            graphics_mhz=1500,
+            memory_mhz=None,
+            settle_seconds=0,
+            monitor_enabled=False,
+        ),
+        nvidia_smi=smi,
+        environ={"CUDA_VISIBLE_DEVICES": "0"},
+        sleeper=lambda _: None,
+        lock_directory=tmp_path,
+        **kwargs,
+    )
+
+
+def test_managed_lock_refuses_a_gpu_this_process_does_not_run_on(tmp_path) -> None:
+    """A physical index is not the visible ordinal, and locking the wrong card
+    on a shared node hits another tenant with no downstream signal at all."""
+    smi = FakeNvidiaSmi(snapshots=[ClockSnapshot(1500, 3996, "t0")])
+
+    with pytest.raises(ClockLockError) as excinfo:
+        with _managed_lock(
+            tmp_path, smi, visible_device_uuid=lambda: "GPU-ccdd"
+        ):
+            pass
+
+    assert "GPU-aabb" in str(excinfo.value)
+    assert "GPU-ccdd" in str(excinfo.value)
+    # Refused before touching the clocks, not after.
+    assert not any(event.startswith("lock_") for event in smi.events)
+
+
+def test_managed_lock_accepts_the_same_uuid_written_differently(tmp_path) -> None:
+    """The prefix and case differ between sources; the identity does not."""
+    smi = FakeNvidiaSmi(
+        snapshots=[
+            ClockSnapshot(1500, 3996, "t0"),
+            ClockSnapshot(900, 3996, "t1"),
+        ]
+    )
+
+    with _managed_lock(tmp_path, smi, visible_device_uuid=lambda: "aabb"):
+        pass
+
+    assert "lock_graphics:1500" in smi.events
+
+
+def test_managed_lock_skips_the_check_when_the_device_is_unknowable(tmp_path) -> None:
+    """No CUDA, ROCm, or no UUID: the cross-check goes quiet instead of failing."""
+    smi = FakeNvidiaSmi(
+        snapshots=[
+            ClockSnapshot(1500, 3996, "t0"),
+            ClockSnapshot(900, 3996, "t1"),
+        ]
+    )
+
+    with _managed_lock(tmp_path, smi, visible_device_uuid=lambda: None):
+        pass
+
+    assert "lock_graphics:1500" in smi.events
+
+
 def test_managed_lock_verifies_sets_marker_and_restores(tmp_path) -> None:
     reports: list[ClockLockReport] = []
     environ = {"CUDA_VISIBLE_DEVICES": "0"}

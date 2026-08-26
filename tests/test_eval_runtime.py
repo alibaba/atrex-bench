@@ -284,6 +284,82 @@ def test_infer_target_dsl_detects_cutedsl_source(tmp_path: Path) -> None:
     assert runtime_module.infer_target_dsl(generated_path) == "cutedsl"
 
 
+def test_infer_target_dsl_detects_cutedsl_by_its_real_import_path(
+    tmp_path: Path,
+) -> None:
+    """CuteDSL is imported as ``cutlass.cute``, never as ``cutedsl``.
+
+    Matching the bare DSL name scored nothing here, so real CuteDSL candidates
+    came back as something else (observed on two of them in a live run).
+    """
+    generated_path = _write_source(
+        tmp_path,
+        "candidate.py",
+        "\n".join(
+            [
+                "import torch",
+                "import cutlass.cute as cute",
+                "",
+                "@cute.kernel",
+                "def kernel(x):",
+                "    return x",
+            ]
+        ),
+    )
+
+    assert runtime_module.infer_target_dsl(generated_path) == "cutedsl"
+
+
+def test_infer_target_dsl_prefers_gluon_over_triton_on_its_own_import(
+    tmp_path: Path,
+) -> None:
+    """Gluon lives under ``triton.experimental.gluon``.
+
+    The bare-name match credited the enclosing Triton package and nothing to
+    Gluon, so every Gluon candidate reported as Triton. Longest prefix wins.
+    """
+    generated_path = _write_source(
+        tmp_path,
+        "candidate.py",
+        "\n".join(
+            [
+                "import triton.experimental.gluon as gluon",
+                "",
+                "@gluon.jit",
+                "def kernel(x_ptr):",
+                "    return",
+            ]
+        ),
+    )
+
+    assert runtime_module.infer_target_dsl(generated_path) == "gluon"
+
+
+def test_infer_target_dsl_lets_a_kernel_definition_outweigh_a_stray_import(
+    tmp_path: Path,
+) -> None:
+    """Defining a kernel beats merely importing another DSL.
+
+    Both DSLs used to score nonzero and the verdict fell through to unknown.
+    """
+    generated_path = _write_source(
+        tmp_path,
+        "candidate.py",
+        "\n".join(
+            [
+                "import triton",
+                "import cutlass.cute as cute",
+                "",
+                "@cute.kernel",
+                "def kernel(x):",
+                "    return x",
+            ]
+        ),
+    )
+
+    assert runtime_module.infer_target_dsl(generated_path) == "cutedsl"
+
+
 def test_infer_target_dsl_returns_unknown_for_plain_pytorch_fixture() -> None:
     fixture_path = Path(__file__).parent / "fixtures" / "generations" / "atrex_001.py"
 

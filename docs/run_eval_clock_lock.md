@@ -49,6 +49,19 @@ The device selector is resolved in this order:
 
 If multiple GPUs are visible and no unambiguous selector is available, the workflow fails before starting the worker.
 
+**Warning: a numeric selector is a physical `nvidia-smi` index, not a runtime device ordinal.**
+In environments that remap devices through `CUDA_VISIBLE_DEVICES` (such as containers, Ray,
+and schedulers), `cuda:0` may refer to physical GPU 3. Passing `0` would instead lock
+physical GPU 0, which may belong to another workload on a shared node. The resolved
+device is cross-checked by UUID against the device used by the current process.
+A mismatch is rejected before any `-lgc` command is issued. The recommended choices
+are to **pass a GPU UUID** or **omit the selector** and let step 3 resolve it from
+`CUDA_VISIBLE_DEVICES`, whose token identifies the physical device.
+
+If the current process cannot provide a device identity (for example, CUDA is unavailable,
+the runtime is ROCm, or the runtime does not expose a UUID), this cross-check is skipped.
+The missing identity alone does not cause the evaluation to fail.
+
 ## Permissions and Idle-GPU Protection
 
 A root process executes `nvidia-smi` with a fixed argument list. A non-root process executes `sudo -n nvidia-smi`, without prompting for a password. The target machine must grant the required non-interactive sudo permissions; otherwise, managed mode fails.

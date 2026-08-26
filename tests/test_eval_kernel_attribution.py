@@ -59,6 +59,33 @@ def _candidate(tmp_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
+def test_e2e_denominator_is_the_median_not_the_first_sample() -> None:
+    """A shape's e2e denominator reduces every sample, it does not index one.
+
+    Indexing worked only while the eager path emitted a single pre-reduced
+    value; among per-iteration samples the first one is the coldest, not the
+    typical one.
+    """
+    from atrex_bench.eval.kernel_attribution import _representative_e2e_ms
+    from atrex_bench.eval.performance import PerformanceSample
+
+    samples = [
+        PerformanceSample(end_to_end_time_ms=9.0),  # cold first iteration
+        PerformanceSample(end_to_end_time_ms=2.0),
+        PerformanceSample(end_to_end_time_ms=2.5),
+    ]
+
+    assert _representative_e2e_ms(samples) == 2.5
+
+
+def test_e2e_denominator_ignores_samples_without_a_timing() -> None:
+    from atrex_bench.eval.kernel_attribution import _representative_e2e_ms
+    from atrex_bench.eval.performance import PerformanceSample
+
+    assert _representative_e2e_ms([PerformanceSample(end_to_end_time_ms=None)]) is None
+    assert _representative_e2e_ms([]) is None
+
+
 def test_ratio_non_flydsl_is_zero_with_error(tmp_path: Path) -> None:
     result = compute_flydsl_compute_ratio_for_shape(
         _candidate(tmp_path),
