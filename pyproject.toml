@@ -25,6 +25,11 @@ dev = [
     "ruff",
 ]
 
+[project.scripts]
+atrex-check-compile = "atrex_bench.cli.check_compile:main"
+atrex-check-correctness = "atrex_bench.cli.check_correctness:main"
+atrex-run-eval = "atrex_bench.cli.run_eval:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["atrex_bench*"]
