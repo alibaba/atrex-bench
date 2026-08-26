@@ -172,8 +172,11 @@ def compute_flydsl_compute_ratio_for_shape(
 
     # Denominator: per-forward end-to-end wall time from do_bench (the only
     # accurate timing source). Numerator: per-forward sum of flydsl kernels'
-    # device time (kernel_events are normalised to per-forward averages in
-    # _measure_runner_samples, so direct sum is per-forward).
+    # device time. Note: kernel_events.device_time_us is normalised to
+    # per-ITERATION totals in _measure_runner_samples (divided by
+    # _PROFILER_BREAKDOWN_ITERS), NOT per-call. When a kernel fires multiple
+    # times per forward (e.g. CUDA graph replay), we must further divide by
+    # calls to get per-forward time comparable to the e2e denominator.
     # Ratio thus = "fraction of candidate wall time spent inside flydsl
     # @kernel GPU work", which is the reward-hacking signal we care about.
     e2e_ms = performance_result.samples[0].end_to_end_time_ms
@@ -189,17 +192,25 @@ def compute_flydsl_compute_ratio_for_shape(
     total_kernel_time = 0.0
     for event in performance_result.kernel_events:
         is_flydsl = _is_flydsl_event(event.name, exact_names, func_patterns)
+        # device_time_us is the total across all `calls` invocations per
+        # profiler iteration.  Normalise to per-call (= per-forward) time so
+        # the sum is comparable to the single-forward e2e wall time from
+        # do_bench.  Without this, candidates that use CUDA graphs (which
+        # cause kernels to fire twice per profiler span — once in the real
+        # execution and once in graph.replay()) inflate the numerator by
+        # the replay factor.
+        per_call_time = event.device_time_us / max(1, event.calls)
         breakdown.append(
             KernelAttribution(
                 name=event.name,
-                device_time_us=event.device_time_us,
+                device_time_us=per_call_time,
                 calls=event.calls,
                 is_flydsl=is_flydsl,
             )
         )
-        total_kernel_time += event.device_time_us
+        total_kernel_time += per_call_time
         if is_flydsl:
-            flydsl_time += event.device_time_us
+            flydsl_time += per_call_time
 
     breakdown.sort(key=lambda k: -k.device_time_us)
 

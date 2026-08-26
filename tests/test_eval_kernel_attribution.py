@@ -121,7 +121,7 @@ def test_ratio_error_when_observed_kernels_missing(tmp_path: Path) -> None:
 
 def test_ratio_pure_flydsl_is_one_via_exact_name(tmp_path: Path) -> None:
     perf = _perf(
-        [KernelTimingEvent("my_op", 1000.0, 10)],
+        [KernelTimingEvent("my_op", 1000.0, 1)],
         observed_kernels={"exact_names": ["my_op"], "func_names": []},
     )
     result = compute_flydsl_compute_ratio_for_shape(
@@ -139,7 +139,7 @@ def test_ratio_pure_flydsl_via_func_pattern(tmp_path: Path) -> None:
     """``func_names: ['_moe_kernel']`` matches ``_moe_kernel_<digits>``.
     500us flydsl over 1000us e2e wall -> ratio 0.5."""
     perf = _perf(
-        [KernelTimingEvent("_moe_kernel_5", 500.0, 3)],
+        [KernelTimingEvent("_moe_kernel_5", 500.0, 1)],
         observed_kernels={"exact_names": [], "func_names": ["_moe_kernel"]},
     )
     result = compute_flydsl_compute_ratio_for_shape(
@@ -155,9 +155,9 @@ def test_ratio_mixed_flydsl_and_torch(tmp_path: Path) -> None:
     denominator is e2e, not sum of kernel events).
     """
     events = [
-        KernelTimingEvent("gdn_gate_o", 2000.0, 64),          # flydsl exact
-        KernelTimingEvent("Cijk_Alik_Bljk_S_...", 3000.0, 64),  # rocBLAS GEMM
-        KernelTimingEvent("void at::native::elementwise_kernel<...>", 1000.0, 64),
+        KernelTimingEvent("gdn_gate_o", 2000.0, 1),          # flydsl exact
+        KernelTimingEvent("Cijk_Alik_Bljk_S_...", 3000.0, 1),  # rocBLAS GEMM
+        KernelTimingEvent("void at::native::elementwise_kernel<...>", 1000.0, 1),
     ]
     perf = _perf(
         events,
