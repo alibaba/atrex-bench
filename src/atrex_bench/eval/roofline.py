@@ -54,6 +54,11 @@ class RooflineHardware:
     Loaded from configs/hardware/<sku>.yaml in the unified spec-only schema
     (commit 54d5bb8). ``p_peak`` is keyed by the path string (e.g. ``bf16_tc``)
     not the short dtype name.
+
+    ``launch_overhead_s`` is the empirically measured minimum kernel dispatch
+    latency on this SKU. When set, roofline SOL is clamped:
+    ``sol_time_s = max(sol_time_s, launch_overhead_s)`` so tiny operators
+    cannot report sub-overhead SOL times.
     """
 
     sku_name: str
@@ -63,6 +68,17 @@ class RooflineHardware:
     p_peak: dict[str, int]  # path string -> FLOPs/s
     b_peak_hbm: int  # bytes/s
     source_doc: str
+    launch_overhead_s: float | None = None
+
+    def __post_init__(self) -> None:
+        value = self.launch_overhead_s
+        if value is not None and (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value <= 0
+        ):
+            raise ValueError("launch_overhead_s must be a finite positive number or null")
 
 
 @dataclass(frozen=True)
@@ -72,11 +88,12 @@ class RooflineResult:
     arithmetic_intensity: float  # W / Q (FLOPs per byte); inf when Q == 0
     ridge_point_ai: float  # P_peak / B_peak (machine balance)
     p_roof_flops_per_s: float  # min(P_peak, AI * B_peak)
-    sol_time_s: float  # W / P_roof; 0.0 when W == 0
+    sol_time_s: float  # max(roofline, launch_overhead); 0.0 when W==Q==0
     sol_time_ms: float  # SOL in milliseconds
     bottleneck: Bottleneck
     p_peak_used: int
     b_peak_used: int
+    clamped_by_overhead: bool = False  # True when launch_overhead_s raised the SOL
 
 
 _RIDGE_BAND = 0.05  # +/-5% around ridge AI counts as balanced
@@ -96,9 +113,7 @@ def resolve_dtype_path(dtype: str) -> str:
     if dtype in DTYPE_PATHS.values():
         return dtype
     known = sorted(set(list(DTYPE_PATHS) + list(DTYPE_PATHS.values())))
-    raise ValueError(
-        f"Unknown dtype: {dtype!r}. Known dtype names / paths: {known}."
-    )
+    raise ValueError(f"Unknown dtype: {dtype!r}. Known dtype names / paths: {known}.")
 
 
 def load_hardware(yaml_path: Path) -> RooflineHardware:
@@ -114,9 +129,7 @@ def load_hardware(yaml_path: Path) -> RooflineHardware:
         raise FileNotFoundError(f"Hardware config not found: {yaml_path}")
     raw = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
-        raise ValueError(
-            f"Hardware config {yaml_path} must be a YAML mapping at top-level."
-        )
+        raise ValueError(f"Hardware config {yaml_path} must be a YAML mapping at top-level.")
 
     hw = raw.get("hardware") or {}
     p_peak_raw = raw.get("p_peak") or {}
@@ -161,14 +174,28 @@ def load_hardware(yaml_path: Path) -> RooflineHardware:
         )
     if not isinstance(b_peak_hbm, (int, float)) or b_peak_hbm <= 0:
         raise ValueError(
-            f"{yaml_path}: b_peak.hbm must be a positive number (bytes/s), "
-            f"got {b_peak_hbm!r}."
+            f"{yaml_path}: b_peak.hbm must be a positive number (bytes/s), got {b_peak_hbm!r}."
         )
     b_peak_hbm_int = int(b_peak_hbm)
 
     source_doc = ""
     if isinstance(source, dict):
         source_doc = str(source.get("vendor_doc") or "")
+
+    launch_overhead_raw = raw.get("launch_overhead_s")
+    launch_overhead_s: float | None = None
+    if launch_overhead_raw is not None:
+        if (
+            isinstance(launch_overhead_raw, bool)
+            or not isinstance(launch_overhead_raw, (int, float))
+            or not math.isfinite(launch_overhead_raw)
+            or launch_overhead_raw <= 0
+        ):
+            raise ValueError(
+                f"{yaml_path}: launch_overhead_s must be a positive number "
+                f"(seconds), got {launch_overhead_raw!r}."
+            )
+        launch_overhead_s = float(launch_overhead_raw)
 
     return RooflineHardware(
         sku_name=str(sku_name),
@@ -178,7 +205,19 @@ def load_hardware(yaml_path: Path) -> RooflineHardware:
         p_peak=cleaned_p_peak,
         b_peak_hbm=b_peak_hbm_int,
         source_doc=source_doc,
+        launch_overhead_s=launch_overhead_s,
     )
+
+
+def apply_launch_overhead(
+    sol_time_s: float,
+    hardware: RooflineHardware,
+) -> tuple[float, bool]:
+    """Apply an explicitly configured latency floor; preserve an empty workload."""
+    floor = hardware.launch_overhead_s
+    if floor is not None and 0.0 < sol_time_s < floor:
+        return float(floor), True
+    return sol_time_s, False
 
 
 def _classify_bottleneck(ai: float, ridge_ai: float) -> Bottleneck:
@@ -208,8 +247,7 @@ def compute_roofline(
 
     if w_flops < 0 or q_bytes < 0:
         raise ValueError(
-            f"w_flops and q_bytes must be non-negative; "
-            f"got w_flops={w_flops}, q_bytes={q_bytes}."
+            f"w_flops and q_bytes must be non-negative; got w_flops={w_flops}, q_bytes={q_bytes}."
         )
 
     path = resolve_dtype_path(dtype)
@@ -251,6 +289,8 @@ def compute_roofline(
     else:
         sol_time_s = w_flops / p_roof
 
+    sol_time_s, clamped = apply_launch_overhead(sol_time_s, hardware)
+
     return RooflineResult(
         arithmetic_intensity=ai,
         ridge_point_ai=ridge_ai,
@@ -260,6 +300,7 @@ def compute_roofline(
         bottleneck=bottleneck,
         p_peak_used=p_peak,
         b_peak_used=b_peak,
+        clamped_by_overhead=clamped,
     )
 
 
@@ -285,9 +326,7 @@ def compute_roofline_hybrid(
     total_w = 0
     for dtype, w in w_flops_by_dtype.items():
         if w < 0:
-            raise ValueError(
-                f"semantic_W_flops[{dtype!r}] must be non-negative, got {w}."
-            )
+            raise ValueError(f"semantic_W_flops[{dtype!r}] must be non-negative, got {w}.")
         path = resolve_dtype_path(dtype)
         if path not in hardware.p_peak:
             raise KeyError(
@@ -333,6 +372,8 @@ def compute_roofline_hybrid(
     else:
         bottleneck = "balanced"
 
+    sol_time_s, clamped = apply_launch_overhead(sol_time_s, hardware)
+
     return RooflineResult(
         arithmetic_intensity=ai,
         ridge_point_ai=ridge_ai,
@@ -342,6 +383,7 @@ def compute_roofline_hybrid(
         bottleneck=bottleneck,
         p_peak_used=dominant_p_peak,
         b_peak_used=b_peak,
+        clamped_by_overhead=clamped,
     )
 
 
@@ -350,6 +392,7 @@ __all__ = [
     "Bottleneck",
     "RooflineHardware",
     "RooflineResult",
+    "apply_launch_overhead",
     "compute_roofline",
     "compute_roofline_hybrid",
     "load_hardware",
