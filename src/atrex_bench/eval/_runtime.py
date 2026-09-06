@@ -592,6 +592,8 @@ def summarize_model_inputs(inputs: ModelInputs) -> dict[str, Any]:
 
 def flatten_outputs(value: Any, prefix: str = "output") -> list[tuple[str, torch.Tensor]]:
     """Flatten nested tensor outputs while preserving their logical path."""
+    if value is None:
+        return []
     if isinstance(value, torch.Tensor):
         return [(prefix, value)]
     if isinstance(value, (bool, int, float)):

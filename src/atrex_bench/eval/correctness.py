@@ -109,6 +109,14 @@ def _validate_output_structures_match(
     path: str = "output",
 ) -> None:
     """Raise ValueError if reference / candidate output structures don't match."""
+    if reference is None or candidate is None:
+        if reference is None and candidate is None:
+            return
+        raise ValueError(
+            f"Output structure mismatch at {path}: "
+            f"reference is {_describe_output_structure(reference)}, "
+            f"candidate is {_describe_output_structure(candidate)}."
+        )
     ref_is_dict = isinstance(reference, dict)
     cand_is_dict = isinstance(candidate, dict)
     if ref_is_dict != cand_is_dict:

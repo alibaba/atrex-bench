@@ -520,6 +520,47 @@ def test_dict_output_passes_with_by_key_pairing(tmp_path: Path) -> None:
         assert diff.max_elementwise_abs_diff == 0.0
 
 
+def test_matching_none_sentinel_in_tuple_output_passes(tmp_path: Path) -> None:
+    reference_path = _write_python_file(
+        tmp_path,
+        "reference_none_tuple.py",
+        "\n".join(
+            [
+                "import torch",
+                "import torch.nn as nn",
+                "",
+                "class Model(nn.Module):",
+                "    def forward(self, x):",
+                "        return x + 1, None",
+                "",
+                "def get_inputs():",
+                "    return [torch.zeros(2, 2)]",
+                "",
+                "def get_init_inputs():",
+                "    return []",
+            ]
+        ),
+    )
+    candidate_path = _write_python_file(
+        tmp_path,
+        "candidate_none_tuple.py",
+        "\n".join(
+            [
+                "import torch.nn as nn",
+                "",
+                "class Model(nn.Module):",
+                "    def forward(self, x):",
+                "        return x + 1, None",
+            ]
+        ),
+    )
+
+    result = check_correctness(reference_path, candidate_path, device="cpu")
+
+    assert result.status == "passed"
+    assert [diff.name for diff in result.cases[0].outputs] == ["output[0]"]
+
+
 def test_dict_reference_vs_tuple_candidate_reports_structure_mismatch(tmp_path: Path) -> None:
     """When reference returns dict but candidate returns tuple, fail with a clear mismatch error."""
     reference_path = _write_python_file(
