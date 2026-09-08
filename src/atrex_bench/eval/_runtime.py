@@ -521,12 +521,14 @@ def _has_non_overlapping_strides(tensor: torch.Tensor) -> bool:
     return True
 
 
-def clone_value(value: Any) -> Any:
-    """Recursively clone tensors while preserving the overall structure."""
+def clone_value(value: Any, _storages: dict | None = None) -> Any:
+    """Clone a call tree, preserving strided storage offsets and input aliases."""
+    if _storages is None:
+        _storages = {}
     if isinstance(value, ModelInputs):
         return ModelInputs(
-            args=clone_value(value.args),
-            kwargs=clone_value(value.kwargs),
+            args=clone_value(value.args, _storages),
+            kwargs=clone_value(value.kwargs, _storages),
         )
     if isinstance(value, torch.Tensor):
         detached = value.detach()
@@ -535,31 +537,28 @@ def clone_value(value: Any) -> Any:
             and not detached.is_quantized
             and not detached.is_nested
         ):
-            if not _has_non_overlapping_strides(detached):
-                return detached.clone()
-            clone = torch.empty_strided(
-                tuple(detached.shape),
-                tuple(detached.stride()),
-                dtype=detached.dtype,
-                device=detached.device,
+            storage = detached.untyped_storage()
+            key = (detached.device, storage._cdata)
+            if key not in _storages:
+                raw = torch.empty(0, dtype=torch.uint8, device=detached.device)
+                raw = raw.set_(storage, 0, (storage.nbytes(),), (1,)).clone()
+                _storages[key] = raw.untyped_storage()
+            return torch.empty(0, dtype=detached.dtype, device=detached.device).set_(
+                _storages[key], detached.storage_offset(), detached.shape, detached.stride()
             )
-            return clone.copy_(detached)
         return detached.clone()
     if isinstance(value, list):
-        return [clone_value(item) for item in value]
+        return [clone_value(item, _storages) for item in value]
     if isinstance(value, tuple):
-        return tuple(clone_value(item) for item in value)
+        return tuple(clone_value(item, _storages) for item in value)
     if isinstance(value, dict):
-        return {key: clone_value(item) for key, item in value.items()}
+        return {key: clone_value(item, _storages) for key, item in value.items()}
     return copy.deepcopy(value)
 
 
 def clone_model_inputs(inputs: ModelInputs) -> ModelInputs:
     """Clone a ModelInputs payload for a fresh model invocation."""
-    return ModelInputs(
-        args=tuple(clone_value(item) for item in inputs.args),
-        kwargs={key: clone_value(item) for key, item in inputs.kwargs.items()},
-    )
+    return clone_value(inputs)
 
 
 def summarize_value(value: Any) -> Any:
@@ -624,13 +623,7 @@ def infer_operator_id(reference_path: Path) -> str:
 def prepare_model_inputs(raw_inputs: Any, device: torch.device) -> ModelInputs:
     """Normalize, clone, and move model inputs to the evaluation device."""
     normalized_inputs = normalize_model_inputs(raw_inputs)
-    return ModelInputs(
-        args=tuple(move_to_device(clone_value(item), device) for item in normalized_inputs.args),
-        kwargs={
-            key: move_to_device(clone_value(item), device)
-            for key, item in normalized_inputs.kwargs.items()
-        },
-    )
+    return move_to_device(clone_model_inputs(normalized_inputs), device)
 
 
 def load_model_inputs(module: ModuleType, device: torch.device) -> ModelInputs:

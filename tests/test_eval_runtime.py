@@ -34,15 +34,18 @@ def test_clone_value_keeps_expanded_tensor_values_without_aliasing() -> None:
     assert torch.equal(cloned, source)
 
 
-def test_clone_value_densifies_internally_overlapped_strided_tensor() -> None:
+def test_clone_value_preserves_internally_overlapped_strided_tensor() -> None:
     source = torch.arange(4).as_strided((2, 2), (1, 1))
 
     cloned = runtime_module.clone_value(source)
 
     assert cloned is not source
     assert cloned.untyped_storage().data_ptr() != source.untyped_storage().data_ptr()
-    assert cloned.stride() != source.stride()
+    assert cloned.stride() == source.stride()
     assert torch.equal(cloned, source)
+    cloned[0, 1] = 42
+    assert cloned[1, 0].item() == 42
+    assert source[0, 1].item() == 1
 
 
 def test_clone_value_keeps_sparse_tensor_clone_support() -> None:

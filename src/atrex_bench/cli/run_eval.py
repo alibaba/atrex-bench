@@ -1388,9 +1388,10 @@ def _correctness_from_payload(payload: dict[str, object]) -> CorrectnessShapeRes
     cases: list[CorrectnessCase] = []
     for raw_case in payload.get("cases") or []:
         case_values = dict(raw_case)
-        case_values["outputs"] = [
-            OutputDiff(**raw_output) for raw_output in (raw_case.get("outputs") or [])
-        ]
+        for field_name in ("outputs", "mutated_inputs", "unexpected_mutations"):
+            case_values[field_name] = [
+                OutputDiff(**raw_output) for raw_output in (raw_case.get(field_name) or [])
+            ]
         cases.append(CorrectnessCase(**case_values))
     values = dict(payload)
     # Keep indexing ``status``: a payload without it is malformed, and KeyError

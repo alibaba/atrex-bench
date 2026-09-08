@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import inspect
+import json
 import os
 import traceback
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import torch
@@ -64,6 +66,8 @@ class CorrectnessCase:
 
     input_artifact: dict[str, str] | None
     outputs: list[OutputDiff] = field(default_factory=list)
+    mutated_inputs: list[OutputDiff] = field(default_factory=list)
+    unexpected_mutations: list[OutputDiff] = field(default_factory=list)
     error: str | None = None
 
 
@@ -86,7 +90,7 @@ class CorrectnessShapeResult:
 
 def _is_leaf_output(value: object) -> bool:
     """Return whether a value is a leaf in the output tree (tensor or numeric scalar)."""
-    return isinstance(value, (torch.Tensor, bool, int, float))
+    return value is None or isinstance(value, (torch.Tensor, bool, int, float))
 
 
 def _describe_output_structure(value: object) -> str:
@@ -107,8 +111,16 @@ def _validate_output_structures_match(
     candidate: object,
     *,
     path: str = "output",
+    strict_types: bool = False,
 ) -> None:
     """Raise ValueError if reference / candidate output structures don't match."""
+    if (strict_types and type(reference) is not type(candidate)) or (
+        (reference is None) != (candidate is None)
+    ):
+        raise ValueError(
+            f"Output structure mismatch at {path}: reference={type(reference).__name__}, "
+            f"candidate={type(candidate).__name__}"
+        )
     ref_is_dict = isinstance(reference, dict)
     cand_is_dict = isinstance(candidate, dict)
     if ref_is_dict != cand_is_dict:
@@ -134,7 +146,7 @@ def _validate_output_structures_match(
             )
         for key in sorted(ref_keys):
             _validate_output_structures_match(
-                reference[key], candidate[key], path=f"{path}.{key}"
+                reference[key], candidate[key], path=f"{path}.{key}", strict_types=strict_types
             )
         return
 
@@ -154,7 +166,7 @@ def _validate_output_structures_match(
             )
         for index, (ref_item, cand_item) in enumerate(zip(reference, candidate)):
             _validate_output_structures_match(
-                ref_item, cand_item, path=f"{path}[{index}]"
+                ref_item, cand_item, path=f"{path}[{index}]", strict_types=strict_types
             )
         return
 
@@ -206,8 +218,15 @@ def _compare_output_tensors(
     atol: float,
     rtol: float,
     max_rel_l2: float | None = None,
+    strict_dtype: bool = False,
 ) -> OutputDiff:
     """Compare a pair of output tensors and return the per-output diff record."""
+    if strict_dtype and reference_tensor.dtype != candidate_tensor.dtype:
+        return OutputDiff(
+            name=name,
+            passed=False,
+            error=f"Output dtype mismatch: {reference_tensor.dtype} != {candidate_tensor.dtype}",
+        )
     if reference_tensor.shape != candidate_tensor.shape:
         return OutputDiff(
             name=name,
@@ -282,6 +301,107 @@ def _compare_output_tensors(
     )
 
 
+def _compare_value_trees(
+    reference, candidate, *, name, atol, rtol, max_rel_l2=None, strict_types=False
+):
+    """Compare return values, with exact types for explicit mutation contracts."""
+    try:
+        _validate_output_structures_match(
+            reference, candidate, path=name, strict_types=strict_types
+        )
+    except ValueError as error:
+        return [OutputDiff(name=name, passed=False, error=str(error))]
+    if isinstance(reference, dict):
+        return [
+            diff
+            for key in reference
+            for diff in _compare_value_trees(
+                reference[key],
+                candidate[key],
+                name=f"{name}.{key}",
+                atol=atol,
+                rtol=rtol,
+                max_rel_l2=max_rel_l2,
+                strict_types=strict_types,
+            )
+        ]
+    if isinstance(reference, (list, tuple)):
+        return [
+            diff
+            for index, (left, right) in enumerate(zip(reference, candidate))
+            for diff in _compare_value_trees(
+                left,
+                right,
+                name=f"{name}[{index}]",
+                atol=atol,
+                rtol=rtol,
+                max_rel_l2=max_rel_l2,
+                strict_types=strict_types,
+            )
+        ]
+    if reference is None:
+        return [OutputDiff(name=name, passed=True)]
+    # Retain legacy scalar conversion and tolerance semantics as well as
+    # list/tuple interoperability for benchmarks without an explicit contract.
+    reference_tensor = flatten_outputs(reference)[0][1]
+    candidate_tensor = flatten_outputs(candidate)[0][1]
+    return [
+        _compare_output_tensors(
+            reference_tensor,
+            candidate_tensor,
+            name=name,
+            atol=atol,
+            rtol=rtol,
+            max_rel_l2=max_rel_l2,
+            strict_dtype=strict_types,
+        )
+    ]
+
+
+def _check_unchanged(before, after, *, name):
+    """Check full backing bytes (including pool tails) without float tolerances."""
+    if type(before) is not type(after):
+        return [OutputDiff(name=name, passed=False, error="Input type changed")]
+    if isinstance(before, torch.Tensor):
+        same = (
+            before.dtype == after.dtype
+            and before.shape == after.shape
+            and before.stride() == after.stride()
+            and before.storage_offset() == after.storage_offset()
+        )
+
+        def raw(tensor):
+            storage = tensor.untyped_storage()
+            return torch.empty(0, dtype=torch.uint8, device=tensor.device).set_(
+                storage, 0, (storage.nbytes(),), (1,)
+            )
+
+        same = same and torch.equal(raw(before), raw(after))
+        return [
+            OutputDiff(
+                name=name, passed=bool(same), error=None if same else "Undeclared input mutation"
+            )
+        ]
+    if isinstance(before, dict):
+        if before.keys() != after.keys():
+            return [OutputDiff(name=name, passed=False, error="Input keys changed")]
+        return [
+            diff
+            for key in before
+            for diff in _check_unchanged(before[key], after[key], name=f"{name}.{key}")
+        ]
+    if isinstance(before, (tuple, list)):
+        if len(before) != len(after):
+            return [OutputDiff(name=name, passed=False, error="Input length changed")]
+        return [
+            diff
+            for index, (left, right) in enumerate(zip(before, after))
+            for diff in _check_unchanged(left, right, name=f"{name}[{index}]")
+        ]
+    same = before == after
+    return [OutputDiff(name=name, passed=bool(same), error=None if same else "Input value changed")]
+
+
 def check_correctness(
     reference_path: Path,
     candidate_path: Path,
@@ -329,6 +449,14 @@ def check_correctness(
             shape = load_shape_spec(reference_path, shape_id)
         else:
             shape = None
+        metadata_path = reference_path.parent / "metadata.json"
+        metadata = json.loads(metadata_path.read_text()) if metadata_path.is_file() else {}
+        contract = metadata.get("benchmark_contract", {})
+        mutations = contract.get("mutates_inputs", [])
+        strict_types = "mutates_inputs" in contract
+        if not isinstance(mutations, list) or not all(isinstance(x, str) for x in mutations):
+            raise ValueError("benchmark_contract.mutates_inputs must be a list of input names")
+        signature = inspect.signature(loaded_models.reference_model.forward)
     except Exception:
         return CorrectnessShapeResult(
             status="failed",
@@ -365,14 +493,9 @@ def check_correctness(
         if skipped <= 0:
             return
         failed_cases += skipped
-        reason = (
-            f"skipped after case {after_case_index} failed deterministically: "
-            f"{short_reason}"
-        )
+        reason = f"skipped after case {after_case_index} failed deterministically: {short_reason}"
         for _ in range(skipped):
-            case_records.append(
-                CorrectnessCase(input_artifact=None, error=reason)
-            )
+            case_records.append(CorrectnessCase(input_artifact=None, error=reason))
 
     for case_index in range(num_correctness_cases):
         # Seed every RNG just before generating inputs so the random tensors
@@ -388,6 +511,15 @@ def check_correctness(
         try:
             reference_call_inputs = clone_model_inputs(inputs)
             candidate_call_inputs = clone_model_inputs(inputs)
+
+            def named(call):
+                return signature.bind(*call.args, **call.kwargs).arguments
+
+            original_named = named(inputs)
+            if set(mutations) - original_named.keys():
+                raise ValueError(
+                    f"Unknown mutated input names: {set(mutations) - original_named.keys()}"
+                )
             with torch.inference_mode():
                 # Reference is the golden implementation; we trust it and
                 # never time it out. The candidate is the AI-generated code
@@ -413,9 +545,7 @@ def check_correctness(
                             error=str(timeout_error),
                         )
                     )
-                    _abort_remaining_cases(
-                        case_index, f"{candidate_timeout_s}s timeout"
-                    )
+                    _abort_remaining_cases(case_index, f"{candidate_timeout_s}s timeout")
                     break
                 if untrusted_mode:
                     try:
@@ -428,13 +558,13 @@ def check_correctness(
                                 error=str(reward_hack),
                             )
                         )
-                        _abort_remaining_cases(
-                            case_index, "untrusted output guard failed"
-                        )
+                        _abort_remaining_cases(case_index, "untrusted output guard failed")
                         break
 
             try:
-                _validate_output_structures_match(reference_output, candidate_output)
+                _validate_output_structures_match(
+                    reference_output, candidate_output, strict_types=strict_types
+                )
             except ValueError as structure_error:
                 failed_cases += 1
                 case_records.append(
@@ -446,48 +576,46 @@ def check_correctness(
                 _abort_remaining_cases(case_index, "output structure mismatch")
                 break
 
-            reference_outputs = flatten_outputs(reference_output)
-            candidate_outputs = flatten_outputs(candidate_output)
-
-            if len(reference_outputs) != len(candidate_outputs):
-                failed_cases += 1
-                case_records.append(
-                    CorrectnessCase(
-                        input_artifact=artifact,
-                        error=(
-                            "Output count mismatch: "
-                            f"reference={len(reference_outputs)}, "
-                            f"candidate={len(candidate_outputs)}"
-                        ),
+            output_diffs = _compare_value_trees(
+                reference_output,
+                candidate_output,
+                name="output",
+                atol=atol,
+                rtol=rtol,
+                max_rel_l2=effective_max_rel_l2,
+                strict_types=strict_types,
+            )
+            output_diffs = [
+                replace(diff, name=_flatten_output_name(diff.name)) for diff in output_diffs
+            ]
+            reference_named = named(reference_call_inputs)
+            candidate_named = named(candidate_call_inputs)
+            mutation_diffs = []
+            unexpected_diffs = []
+            for key, before in original_named.items():
+                if key in mutations:
+                    mutation_diffs.extend(
+                        _compare_value_trees(
+                            reference_named[key],
+                            candidate_named[key],
+                            name=f"input.{key}",
+                            atol=atol,
+                            rtol=rtol,
+                            max_rel_l2=effective_max_rel_l2,
+                            strict_types=True,
+                        )
                     )
-                )
-                _abort_remaining_cases(case_index, "output count mismatch")
-                break
-
-            output_diffs: list[OutputDiff] = []
-            case_passed = True
-            has_structural_failure = False
-            for (raw_name, reference_tensor), (_, candidate_tensor) in zip(
-                reference_outputs,
-                candidate_outputs,
-            ):
-                output_diff = _compare_output_tensors(
-                    reference_tensor,
-                    candidate_tensor,
-                    name=_flatten_output_name(raw_name),
-                    atol=atol,
-                    rtol=rtol,
-                    max_rel_l2=effective_max_rel_l2,
-                )
-                output_diffs.append(output_diff)
-                if not output_diff.passed:
-                    case_passed = False
-                # error != None means this is a structural failure (shape
-                # mismatch, compare-time exception) rather than an atol/rtol
-                # diff. Structural failures are deterministic, so we treat
-                # them like the other non-accuracy failures and early-abort.
-                if output_diff.error is not None:
-                    has_structural_failure = True
+                else:
+                    for role, state in (
+                        ("reference", reference_named),
+                        ("candidate", candidate_named),
+                    ):
+                        unexpected_diffs.extend(
+                            _check_unchanged(before, state[key], name=f"{role}.input.{key}")
+                        )
+            all_diffs = output_diffs + mutation_diffs + unexpected_diffs
+            case_passed = all(diff.passed for diff in all_diffs)
+            has_structural_failure = any(diff.error is not None for diff in all_diffs)
 
             if not case_passed:
                 failed_cases += 1
@@ -496,13 +624,13 @@ def check_correctness(
                 CorrectnessCase(
                     input_artifact=artifact,
                     outputs=output_diffs,
+                    mutated_inputs=mutation_diffs,
+                    unexpected_mutations=unexpected_diffs,
                 )
             )
 
             if has_structural_failure:
-                _abort_remaining_cases(
-                    case_index, "per-tensor shape/structural mismatch"
-                )
+                _abort_remaining_cases(case_index, "per-tensor shape/structural mismatch")
                 break
         except Exception:
             # Any other exception in the case body (e.g. candidate raised an
@@ -517,9 +645,7 @@ def check_correctness(
                     error=tb,
                 )
             )
-            _abort_remaining_cases(
-                case_index, "candidate raised exception"
-            )
+            _abort_remaining_cases(case_index, "candidate raised exception")
             break
 
     if failed_cases == 0:
