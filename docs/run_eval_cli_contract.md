@@ -28,9 +28,10 @@ start an evaluation, the subprocess fails abnormally, or the result artifacts ar
 | Field | Type | Required when | Description |
 |---|---|---|---|
 | `schema_version` | string | Recommended | Currently fixed to `v1`. |
-| `eval_mode` | enum | Optional | `candidate` or `torch_compile_reference`; defaults to `candidate`. |
+| `eval_mode` | enum | Optional | `candidate`, `abba`, or `torch_compile_reference`; defaults to `candidate`, or `abba` when `baseline_input` is supplied. |
 | `validation_mode` | enum | Optional | `full`, `correctness_only`, or `performance_only`; defaults to `full`. |
-| `input` | path | Required in candidate mode | Candidate Python file; must not be set in Torch compile mode. |
+| `input` | path | Required in candidate and ABBA modes | Candidate Python file; must not be set in Torch compile mode. |
+| `baseline_input` | path | Required in ABBA mode | Baseline A Python file. `input` is candidate B. Supplying `--baseline-input` selects ABBA mode. |
 | `reference_dir` | path | Always | Reference directory. Must contain `reference.py`, `input.py`, `shapes.json`, and `metadata.json`. |
 | `output` | path | Always | Root directory for evaluation artifacts. |
 | `checkpoint_dir` | path | Optional | Root directory for correctness/performance checkpoints. |
@@ -46,6 +47,7 @@ Except for mode switches and compatibility aliases, all public CLI options below
 | Full | No only-mode option | Compile, correctness, and performance. |
 | Correctness only | `--correctness-only` | Compile and correctness. |
 | Performance only | `--performance-only` | Compile and performance. |
+| ABBA comparison | `--baseline-input BASELINE --input CANDIDATE` | Four complete evaluations in A-B-B-A order. |
 | Torch compile reference | `--torch-compile` | Performance of `torch.compile(reference Model)`. |
 
 Constraints:
@@ -53,6 +55,16 @@ Constraints:
 - `--correctness-only` and `--performance-only` are mutually exclusive.
 - `--torch-compile` cannot be combined with `--input`, `--correctness-only`, or `--performance-only`.
 - `eval_mode=torch_compile_reference` always runs performance evaluation. If `validation_mode` is explicitly set in the config, it must be `performance_only`.
+- ABBA mode requires both `baseline_input` and `input`, and always uses `validation_mode=full`.
+- All four ABBA runs execute under one top-level clock policy. Each run uses an isolated worker and artifact directory.
+
+ABBA aggregation first takes the median of each shape's samples within one run,
+then the geometric mean of the two A or B run medians. The aggregate latency is
+the geometric mean across shapes. The result reports
+`speedup = baseline_latency / candidate_latency` and
+`improvement_pct = (speedup - 1) * 100` both per shape and overall. Any failed
+run, invalid timing, incomplete schedule, or environment mismatch fails the ABBA
+result; partial runs remain available as artifacts but are not aggregated.
 
 ## 4. Recommended General Options
 
@@ -139,6 +151,7 @@ The Gateway exposes only `--config`. The JSON config supports all public capabil
 | CLI capability | Config field |
 |---|---|
 | `--torch-compile` | `"eval_mode": "torch_compile_reference"` |
+| `--baseline-input PATH` | `"eval_mode": "abba", "baseline_input": "PATH"` |
 | `--correctness-only` | `"validation_mode": "correctness_only"` |
 | `--performance-only` | `"validation_mode": "performance_only"` |
 | `--lock-clocks` | `"clock_lock_mode": "manage"` |
@@ -187,6 +200,22 @@ Example: performance-only candidate evaluation with managed GPU clock locking:
   "clock_lock_runtime_tolerance_mhz": 5,
   "clock_lock_fail_on_deviation": false,
   "clock_lock_require_idle": true
+}
+```
+
+Example: ABBA comparison:
+
+```json
+{
+  "schema_version": "v1",
+  "eval_mode": "abba",
+  "validation_mode": "full",
+  "baseline_input": "/abs/path/baseline.py",
+  "input": "/abs/path/candidate.py",
+  "reference_dir": "/abs/path/operator",
+  "output": "/abs/path/results",
+  "warmup_iters": 10,
+  "bench_iters": 100
 }
 ```
 
@@ -262,6 +291,7 @@ Main artifacts:
 
 - `<output>/<timestamp>/<operator>/eval_result.json`
 - `<output>/<timestamp>/<operator>/staging_manifest.json`
+- `<output>/<timestamp>/<operator>/abba_runs/{00-baseline,01-candidate,02-candidate,03-baseline}/eval_result.json` in ABBA mode
 - `clock_lock.json` and `clock_lock_trace.csv` in managed clock-locking mode
 
 Progress logs are written to stderr. Integrations must use both the process exit code and `eval_result.json` to determine the outcome.

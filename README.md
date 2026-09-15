@@ -224,6 +224,22 @@ Measure the `torch.compile` baseline instead of a candidate:
 python scripts/run_eval.py --torch-compile --reference-dir data/attention_forward --output results/torch_compile
 ```
 
+Compare a candidate (B) with a baseline (A) using a counterbalanced A-B-B-A
+schedule in one evaluator invocation:
+
+```bash
+python scripts/run_eval.py \
+  --baseline-input path/to/baseline_kernel.py \
+  --input path/to/candidate_kernel.py \
+  --reference-dir data/attention_forward \
+  --output results/attention_forward_abba
+```
+
+Each of the four runs performs the full compile, correctness, and performance
+pipeline in an isolated worker. The top-level `eval_result.json` reports the
+per-shape and aggregate candidate speedup over the baseline. With managed clock
+locking, one lock and monitoring session covers the complete A-B-B-A sequence.
+
 ## Repository Layout
 
 ```text
