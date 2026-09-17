@@ -1039,6 +1039,68 @@ def test_validation_mode_cli_propagates_and_exits_successfully(
     assert calls[0]["validation_mode"] == expected_mode
 
 
+def test_metadata_tolerances_warn_when_overriding_global_rel_l2(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from scripts import run_eval as run_eval_module
+
+    reference_dir = tmp_path / "reference"
+    reference_dir.mkdir()
+    (reference_dir / "metadata.json").write_text(
+        json.dumps(
+            {
+                "benchmark_contract": {
+                    "correctness_tolerances": {
+                        "output": {"atol": 0.01, "rtol": 0.01}
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    calls: list[dict[str, object]] = []
+
+    def fake_run_eval(**kwargs: object) -> dict[str, object]:
+        calls.append(kwargs)
+        return {
+            "runner_config": {"validation_mode": "correctness_only"},
+            "passed": {
+                "compile": {"0": {"status": "passed"}},
+                "correctness": {"0": {"status": "passed"}},
+                "performance": {"0": {"status": "skipped"}},
+            },
+            "error": None,
+        }
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_eval.py",
+            "--input",
+            str(tmp_path / "candidate.py"),
+            "--reference-dir",
+            str(reference_dir),
+            "--output",
+            str(tmp_path / "output"),
+            "--correctness-only",
+            "--correctness-max-rel-l2",
+            "0.2",
+        ],
+    )
+    monkeypatch.setattr(run_eval_module, "run_eval", fake_run_eval)
+    caplog.set_level("WARNING", logger="atrex_bench.cli.run_eval")
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_eval_module.main()
+
+    assert exc_info.value.code == 0
+    assert len(calls) == 1
+    assert "Ignoring correctness_max_rel_l2=0.2" in caplog.text
+
+
 def test_config_only_candidate_launch_resolves_paths_and_mode(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

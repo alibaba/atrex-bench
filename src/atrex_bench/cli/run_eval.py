@@ -8,6 +8,7 @@ import contextlib
 import copy
 import hashlib
 import json
+import logging
 import math
 import os
 import secrets
@@ -63,6 +64,8 @@ from atrex_bench.eval.clock_monitor import NvidiaClockMonitor
 from atrex_bench.eval.correctness import (
     CORRECTNESS_MAX_REL_L2_ENV,
     configured_max_rel_l2,
+    load_minimum_correctness_cases,
+    metadata_owns_correctness,
 )
 from atrex_bench.eval.nvidia_clock import NvidiaSmi
 from atrex_bench.eval.reward_hack import (
@@ -116,6 +119,7 @@ _VALIDATION_MODES = frozenset(
         _VALIDATION_MODE_PERFORMANCE_ONLY,
     }
 )
+logger = logging.getLogger(__name__)
 _RUNNER_CONFIG_SCHEMA_VERSION = "v1"
 _EVAL_MODES = frozenset(
     {_ABBA_EVAL_MODE, _CANDIDATE_EVAL_MODE, _TORCH_COMPILE_EVAL_MODE}
@@ -4664,6 +4668,20 @@ def main() -> None:
         config=runner_file_config,
         default=None,
     )
+    try:
+        metadata_controls_correctness = metadata_owns_correctness(
+            args.reference_dir / "reference.py"
+        )
+    except (OSError, TypeError, ValueError) as error:
+        raise SystemExit(str(error)) from error
+    if metadata_controls_correctness:
+        if args.correctness_max_rel_l2 is not None:
+            logger.warning(
+                "Ignoring correctness_max_rel_l2=%s because metadata declares "
+                "authoritative correctness_tolerances",
+                args.correctness_max_rel_l2,
+            )
+        args.correctness_max_rel_l2 = None
     args.num_correctness_cases = int(
         _resolve_runner_option(
             "num_correctness_cases",
@@ -4672,6 +4690,16 @@ def main() -> None:
             default=_DEFAULT_NUM_CORRECTNESS_CASES,
         )
     )
+    try:
+        # Resolve the floor here so timeout budgets, child-worker argv, and
+        # runner_config all describe the effective case count. The evaluator
+        # repeats the guard only for callers that bypass this CLI.
+        args.num_correctness_cases = max(
+            args.num_correctness_cases,
+            load_minimum_correctness_cases(args.reference_dir / "reference.py"),
+        )
+    except (OSError, TypeError, ValueError) as error:
+        raise SystemExit(str(error)) from error
     args.warmup_iters = int(
         _resolve_runner_option(
             "warmup_iters",
