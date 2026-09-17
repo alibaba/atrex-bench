@@ -3058,15 +3058,25 @@ def _abba_run_latency_ms_by_shape(
         samples = shape.get("samples")
         if not isinstance(samples, list):
             return None, f"shape {shape_id!r} performance samples are missing"
-        values = [
-            value
-            for sample in samples
-            if isinstance(sample, dict)
-            if (value := _positive_finite_float(sample.get("end_to_end_time_ms")))
-            is not None
-        ]
-        if not values:
-            return None, f"shape {shape_id!r} has no positive finite performance sample"
+        if not samples:
+            return None, f"shape {shape_id!r} has no performance samples"
+        values: list[float] = []
+        for sample_index, sample in enumerate(samples):
+            if not isinstance(sample, dict):
+                return (
+                    None,
+                    f"shape {shape_id!r} performance sample {sample_index} "
+                    "is not an object",
+                )
+            raw_latency = sample.get("end_to_end_time_ms")
+            latency = _positive_finite_float(raw_latency)
+            if latency is None:
+                return (
+                    None,
+                    f"shape {shape_id!r} performance sample {sample_index} has "
+                    f"invalid end_to_end_time_ms: {raw_latency!r}",
+                )
+            values.append(latency)
         latency_by_shape[shape_id] = float(statistics.median(values))
     return latency_by_shape, None
 

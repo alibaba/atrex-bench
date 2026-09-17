@@ -393,6 +393,64 @@ def test_aggregate_abba_runs_rejects_failed_or_reordered_run() -> None:
     assert error == "ABBA runs do not match the required A-B-B-A schedule"
 
 
+@pytest.mark.parametrize(
+    ("invalid_sample", "reason"),
+    [
+        pytest.param(
+            {"end_to_end_time_ms": 0.0},
+            "invalid end_to_end_time_ms: 0.0",
+            id="zero",
+        ),
+        pytest.param(
+            {"end_to_end_time_ms": -1.0},
+            "invalid end_to_end_time_ms: -1.0",
+            id="negative",
+        ),
+        pytest.param(
+            {"end_to_end_time_ms": None},
+            "invalid end_to_end_time_ms: None",
+            id="none",
+        ),
+        pytest.param(
+            {"end_to_end_time_ms": float("nan")},
+            "invalid end_to_end_time_ms: nan",
+            id="nan",
+        ),
+        pytest.param(
+            {"end_to_end_time_ms": float("inf")},
+            "invalid end_to_end_time_ms: inf",
+            id="infinite",
+        ),
+        pytest.param(
+            {},
+            "invalid end_to_end_time_ms: None",
+            id="missing-latency",
+        ),
+        pytest.param(None, "is not an object", id="malformed-sample"),
+    ],
+)
+def test_aggregate_abba_runs_rejects_any_invalid_timing_sample(
+    invalid_sample: object,
+    reason: str,
+) -> None:
+    from scripts import run_eval as run_eval_module
+
+    payloads = [_passing_abba_run({"0": [2.0]}) for _ in range(4)]
+    samples = payloads[1]["performance"]["shapes"]["0"]["samples"]
+    samples.append(invalid_sample)
+    runs = [
+        {**step, "result": payload}
+        for step, payload in zip(run_eval_module._abba_schedule(), payloads)
+    ]
+
+    aggregate, error = run_eval_module._aggregate_abba_runs(runs, ["0"])
+
+    assert aggregate is None
+    assert error is not None
+    assert error.startswith("ABBA run 1 (B): shape '0' performance sample 1")
+    assert reason in error
+
+
 def test_run_abba_process_executes_isolated_abba_schedule(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
