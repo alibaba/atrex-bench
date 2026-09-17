@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import math
 import os
 import traceback
 from dataclasses import dataclass, field, replace
@@ -52,6 +53,14 @@ class OutputDiff:
     max_elementwise_rel_diff: float | None = None
     relative_l2: float | None = None
     error: str | None = None
+
+
+@dataclass(frozen=True)
+class OutputTolerance:
+    """Elementwise tolerance for one logical output tensor path."""
+
+    atol: float
+    rtol: float
 
 
 @dataclass(frozen=True)
@@ -302,7 +311,17 @@ def _compare_output_tensors(
 
 
 def _compare_value_trees(
-    reference, candidate, *, name, atol, rtol, max_rel_l2=None, strict_types=False
+    reference,
+    candidate,
+    *,
+    name,
+    atol,
+    rtol,
+    max_rel_l2=None,
+    strict_types=False,
+    output_tolerances=None,
+    tolerance_name=None,
+    matched_tolerance_paths=None,
 ):
     """Compare return values, with exact types for explicit mutation contracts."""
     try:
@@ -311,6 +330,7 @@ def _compare_value_trees(
         )
     except ValueError as error:
         return [OutputDiff(name=name, passed=False, error=str(error))]
+    logical_name = name if tolerance_name is None else tolerance_name
     if isinstance(reference, dict):
         return [
             diff
@@ -323,6 +343,9 @@ def _compare_value_trees(
                 rtol=rtol,
                 max_rel_l2=max_rel_l2,
                 strict_types=strict_types,
+                output_tolerances=output_tolerances,
+                tolerance_name=f"{logical_name}.{key}",
+                matched_tolerance_paths=matched_tolerance_paths,
             )
         ]
     if isinstance(reference, (list, tuple)):
@@ -337,6 +360,9 @@ def _compare_value_trees(
                 rtol=rtol,
                 max_rel_l2=max_rel_l2,
                 strict_types=strict_types,
+                output_tolerances=output_tolerances,
+                tolerance_name=f"{logical_name}[{index}]",
+                matched_tolerance_paths=matched_tolerance_paths,
             )
         ]
     if reference is None:
@@ -345,17 +371,105 @@ def _compare_value_trees(
     # list/tuple interoperability for benchmarks without an explicit contract.
     reference_tensor = flatten_outputs(reference)[0][1]
     candidate_tensor = flatten_outputs(candidate)[0][1]
+    tolerance = (output_tolerances or {}).get(logical_name)
+    if tolerance is not None and matched_tolerance_paths is not None:
+        matched_tolerance_paths.add(logical_name)
     return [
         _compare_output_tensors(
             reference_tensor,
             candidate_tensor,
             name=name,
-            atol=atol,
-            rtol=rtol,
+            atol=tolerance.atol if tolerance is not None else atol,
+            rtol=tolerance.rtol if tolerance is not None else rtol,
             max_rel_l2=max_rel_l2,
             strict_dtype=strict_types,
         )
     ]
+
+
+def _load_benchmark_contract(reference_path: Path) -> tuple[Path, dict[str, object]]:
+    """Load the evaluator-only benchmark contract next to a reference."""
+
+    metadata_path = reference_path.parent / "metadata.json"
+    if not metadata_path.is_file():
+        return metadata_path, {}
+    payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    contract = payload.get("benchmark_contract") or {}
+    if not isinstance(contract, dict):
+        raise TypeError(f"{metadata_path}.benchmark_contract must be an object")
+    return metadata_path, contract
+
+
+def _load_output_tolerance_contract(reference_path: Path) -> dict[str, OutputTolerance]:
+    """Load optional per-output allclose tolerances from metadata."""
+
+    metadata_path, contract = _load_benchmark_contract(reference_path)
+    raw_tolerances = contract.get("correctness_tolerances")
+    if raw_tolerances is None:
+        return {}
+    if not isinstance(raw_tolerances, dict) or not raw_tolerances:
+        raise TypeError(
+            f"{metadata_path}.benchmark_contract.correctness_tolerances "
+            "must be a non-empty object"
+        )
+
+    tolerances: dict[str, OutputTolerance] = {}
+    for raw_path, raw_policy in raw_tolerances.items():
+        is_output_path = isinstance(raw_path, str) and (
+            raw_path == "output"
+            or raw_path.startswith("output[")
+            or raw_path.startswith("output.")
+        )
+        is_mutation_path = isinstance(raw_path, str) and raw_path.startswith(
+            "mutated_inputs."
+        )
+        if not (is_output_path or is_mutation_path):
+            raise ValueError(
+                "correctness_tolerances keys must be logical output or "
+                f"declared-mutation paths: {raw_path!r}"
+            )
+        if not isinstance(raw_policy, dict):
+            raise TypeError(f"correctness_tolerances[{raw_path!r}] must be an object")
+        unknown = sorted(set(raw_policy) - {"atol", "rtol"})
+        if unknown:
+            raise ValueError(
+                f"correctness_tolerances[{raw_path!r}] has unknown fields: {unknown}"
+            )
+        if "atol" not in raw_policy or "rtol" not in raw_policy:
+            raise ValueError(f"correctness_tolerances[{raw_path!r}] requires atol and rtol")
+        tensor_atol = float(raw_policy["atol"])
+        tensor_rtol = float(raw_policy["rtol"])
+        if (
+            not math.isfinite(tensor_atol)
+            or not math.isfinite(tensor_rtol)
+            or tensor_atol < 0
+            or tensor_rtol < 0
+        ):
+            raise ValueError(
+                f"correctness_tolerances[{raw_path!r}] must contain finite, "
+                "non-negative atol and rtol"
+            )
+        tolerances[raw_path] = OutputTolerance(atol=tensor_atol, rtol=tensor_rtol)
+    return tolerances
+
+
+def metadata_owns_correctness(reference_path: Path) -> bool:
+    """Return whether metadata declares authoritative per-output tolerances."""
+
+    return bool(_load_output_tolerance_contract(reference_path))
+
+
+def load_minimum_correctness_cases(reference_path: Path) -> int:
+    """Return the optional metadata-owned minimum random coverage per shape."""
+
+    metadata_path, contract = _load_benchmark_contract(reference_path)
+    raw_value = contract.get("correctness_min_cases", 1)
+    if isinstance(raw_value, bool) or not isinstance(raw_value, int) or raw_value < 1:
+        raise ValueError(
+            f"{metadata_path}.benchmark_contract.correctness_min_cases "
+            "must be a positive integer"
+        )
+    return raw_value
 
 
 def _check_unchanged(before, after, *, name):
@@ -430,8 +544,14 @@ def check_correctness(
             reason="num_correctness_cases must be at least 1",
         )
     try:
+        # The CLI resolves this floor before sizing worker budgets and writing
+        # runner_config. Keep the same guard here for direct library callers.
+        effective_num_correctness_cases = max(
+            num_correctness_cases,
+            load_minimum_correctness_cases(reference_path),
+        )
         effective_max_rel_l2 = configured_max_rel_l2(max_rel_l2)
-    except ValueError as error:
+    except (OSError, TypeError, ValueError) as error:
         return CorrectnessShapeResult(status="failed", reason=str(error))
 
     try:
@@ -449,13 +569,25 @@ def check_correctness(
             shape = load_shape_spec(reference_path, shape_id)
         else:
             shape = None
-        metadata_path = reference_path.parent / "metadata.json"
-        metadata = json.loads(metadata_path.read_text()) if metadata_path.is_file() else {}
-        contract = metadata.get("benchmark_contract", {})
+        _, contract = _load_benchmark_contract(reference_path)
         mutations = contract.get("mutates_inputs", [])
+        scratch_inputs = contract.get("scratch_inputs", [])
         strict_types = "mutates_inputs" in contract
         if not isinstance(mutations, list) or not all(isinstance(x, str) for x in mutations):
             raise ValueError("benchmark_contract.mutates_inputs must be a list of input names")
+        if not isinstance(scratch_inputs, list) or not all(
+            isinstance(x, str) for x in scratch_inputs
+        ):
+            raise ValueError("benchmark_contract.scratch_inputs must be a list of input names")
+        if set(mutations) & set(scratch_inputs):
+            raise ValueError(
+                "benchmark_contract mutates_inputs and scratch_inputs must not overlap"
+            )
+        output_tolerances = _load_output_tolerance_contract(reference_path)
+        if output_tolerances:
+            # Per-output metadata is authoritative and must not be replaced by
+            # a legacy process-wide relative-L2 threshold.
+            effective_max_rel_l2 = None
         signature = inspect.signature(loaded_models.reference_model.forward)
     except Exception:
         return CorrectnessShapeResult(
@@ -489,7 +621,7 @@ def check_correctness(
         """
         nonlocal failed_cases, early_abort_reason
         early_abort_reason = short_reason
-        skipped = num_correctness_cases - (after_case_index + 1)
+        skipped = effective_num_correctness_cases - (after_case_index + 1)
         if skipped <= 0:
             return
         failed_cases += skipped
@@ -497,7 +629,7 @@ def check_correctness(
         for _ in range(skipped):
             case_records.append(CorrectnessCase(input_artifact=None, error=reason))
 
-    for case_index in range(num_correctness_cases):
+    for case_index in range(effective_num_correctness_cases):
         # Seed every RNG just before generating inputs so the random tensors
         # are reproducible from the recorded seed alone (no .pt files needed).
         seed = deterministic_input_seed("correctness", shape_id, case_index)
@@ -519,6 +651,10 @@ def check_correctness(
             if set(mutations) - original_named.keys():
                 raise ValueError(
                     f"Unknown mutated input names: {set(mutations) - original_named.keys()}"
+                )
+            if set(scratch_inputs) - original_named.keys():
+                raise ValueError(
+                    f"Unknown scratch input names: {set(scratch_inputs) - original_named.keys()}"
                 )
             with torch.inference_mode():
                 # Reference is the golden implementation; we trust it and
@@ -576,6 +712,7 @@ def check_correctness(
                 _abort_remaining_cases(case_index, "output structure mismatch")
                 break
 
+            matched_tolerance_paths: set[str] = set()
             output_diffs = _compare_value_trees(
                 reference_output,
                 candidate_output,
@@ -584,6 +721,8 @@ def check_correctness(
                 rtol=rtol,
                 max_rel_l2=effective_max_rel_l2,
                 strict_types=strict_types,
+                output_tolerances=output_tolerances,
+                matched_tolerance_paths=matched_tolerance_paths,
             )
             output_diffs = [
                 replace(diff, name=_flatten_output_name(diff.name)) for diff in output_diffs
@@ -603,8 +742,13 @@ def check_correctness(
                             rtol=rtol,
                             max_rel_l2=effective_max_rel_l2,
                             strict_types=True,
+                            output_tolerances=output_tolerances,
+                            tolerance_name=f"mutated_inputs.{key}",
+                            matched_tolerance_paths=matched_tolerance_paths,
                         )
                     )
+                elif key in scratch_inputs:
+                    continue
                 else:
                     for role, state in (
                         ("reference", reference_named),
@@ -613,6 +757,14 @@ def check_correctness(
                         unexpected_diffs.extend(
                             _check_unchanged(before, state[key], name=f"{role}.input.{key}")
                         )
+            unmatched_tolerance_paths = sorted(
+                set(output_tolerances) - matched_tolerance_paths
+            )
+            if unmatched_tolerance_paths:
+                raise ValueError(
+                    "correctness_tolerances paths did not match compared values: "
+                    + ", ".join(unmatched_tolerance_paths)
+                )
             all_diffs = output_diffs + mutation_diffs + unexpected_diffs
             case_passed = all(diff.passed for diff in all_diffs)
             has_structural_failure = any(diff.error is not None for diff in all_diffs)
@@ -653,7 +805,7 @@ def check_correctness(
         reason: str | None = None
     else:
         status = "failed"
-        base = f"{failed_cases}/{num_correctness_cases} correctness cases failed"
+        base = f"{failed_cases}/{effective_num_correctness_cases} correctness cases failed"
         if early_abort_reason is not None:
             reason = f"{base}: {early_abort_reason}"
         else:

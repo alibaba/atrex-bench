@@ -33,6 +33,36 @@ requires `x` to remain immutable. Declared mutable inputs are compared element b
 element over their logical views; declaring an alias does not certify bytes
 outside the union of those views.
 
+Inputs used only as disposable workspace can be excluded from semantic output
+comparison with `scratch_inputs`:
+
+```json
+{"benchmark_contract": {"scratch_inputs": ["workspace_buffer"]}}
+```
+
+## Per-output policies
+
+An operator may own elementwise tolerances for individual return values and
+declared mutations:
+
+```json
+{
+  "benchmark_contract": {
+    "correctness_tolerances": {
+      "output[0]": {"atol": 0.01, "rtol": 0.01},
+      "mutated_inputs.out": {"atol": 0.06, "rtol": 0.04}
+    },
+    "correctness_min_cases": 6
+  }
+}
+```
+
+Paths must match a value actually compared by the evaluator; stale or
+misspelled paths fail evaluation. When `correctness_tolerances` is present it
+is authoritative and legacy global relative-L2 or mismatch-rate options cannot
+replace its elementwise checks. `correctness_min_cases` is a floor: a larger
+CLI-requested case count is retained.
+
 ## Scope and compatibility
 
 CUDA Graph replay's separate output-only checker has not been extended to
@@ -47,3 +77,7 @@ tuple/list, numeric scalar and tensor dtype comparison behavior. Explicit
 mutation contracts require exact container/scalar types and tensor dtypes;
 floating-point values still use the configured numerical tolerances. `None`
 must match `None` in both modes, including nested leaves.
+
+Benchmarks that omit `correctness_tolerances`, `correctness_min_cases`, and
+`scratch_inputs` retain the previous global tolerance, case-count, and input
+mutation behavior.
