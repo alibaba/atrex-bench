@@ -8,11 +8,13 @@ import contextlib
 import copy
 import hashlib
 import json
+import math
 import os
 import secrets
 import selectors
 import shutil
 import signal
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -76,6 +78,7 @@ _SKIP_COMPILE_REASON = "Skipped because compile stage failed."
 _PENDING_EVAL_REASON = "Evaluation did not complete."
 _TORCH_COMPILE_EVAL_MODE = "torch_compile_reference"
 _CANDIDATE_EVAL_MODE = "candidate"
+_ABBA_EVAL_MODE = "abba"
 _TORCH_COMPILE_SKIP_REASON = "Skipped in torch_compile_reference mode."
 _SKIP_CORRECTNESS_REASON = "Skipped in performance_only mode."
 _SKIP_PERFORMANCE_REASON = "Skipped in correctness_only mode."
@@ -114,12 +117,15 @@ _VALIDATION_MODES = frozenset(
     }
 )
 _RUNNER_CONFIG_SCHEMA_VERSION = "v1"
-_EVAL_MODES = frozenset({_CANDIDATE_EVAL_MODE, _TORCH_COMPILE_EVAL_MODE})
+_EVAL_MODES = frozenset(
+    {_ABBA_EVAL_MODE, _CANDIDATE_EVAL_MODE, _TORCH_COMPILE_EVAL_MODE}
+)
 _RUNNER_CONFIG_KEYS = frozenset(
     {
         "schema_version",
         "eval_mode",
         "input",
+        "baseline_input",
         "reference_dir",
         "output",
         "checkpoint_dir",
@@ -408,12 +414,20 @@ def _resolve_path_option(
 
 def _resolve_eval_mode(
     cli_torch_compile: bool,
+    cli_baseline_input: Path | None,
     config: dict[str, object],
 ) -> str:
     """Resolve the top-level evaluator mode with CLI precedence."""
     if cli_torch_compile:
         return _TORCH_COMPILE_EVAL_MODE
-    mode = config.get("eval_mode", _CANDIDATE_EVAL_MODE)
+    if cli_baseline_input is not None:
+        return _ABBA_EVAL_MODE
+    default_mode = (
+        _ABBA_EVAL_MODE
+        if config.get("baseline_input") is not None
+        else _CANDIDATE_EVAL_MODE
+    )
+    mode = config.get("eval_mode", default_mode)
     if not isinstance(mode, str) or mode not in _EVAL_MODES:
         allowed = ", ".join(sorted(_EVAL_MODES))
         raise ValueError(f"eval_mode must be one of: {allowed}")
@@ -2993,6 +3007,428 @@ def _run_torch_compile_eval_process(
     return saved_payload
 
 
+def _abba_schedule() -> list[dict[str, object]]:
+    """Return the fixed counterbalanced baseline/candidate measurement order."""
+    revisions = (
+        ("baseline", "A", 0),
+        ("candidate", "B", 0),
+        ("candidate", "B", 1),
+        ("baseline", "A", 1),
+    )
+    return [
+        {
+            "index": index,
+            "revision": revision,
+            "label": label,
+            "repeat": repeat,
+        }
+        for index, (revision, label, repeat) in enumerate(revisions)
+    ]
+
+
+def _positive_finite_float(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    return number if number > 0.0 and math.isfinite(number) else None
+
+
+def _geometric_mean(values: list[float]) -> float | None:
+    if not values or any(_positive_finite_float(value) is None for value in values):
+        return None
+    return math.exp(sum(math.log(value) for value in values) / len(values))
+
+
+def _abba_run_latency_ms_by_shape(
+    payload: dict[str, object],
+    shape_ids: list[str],
+) -> tuple[dict[str, float] | None, str | None]:
+    performance = payload.get("performance")
+    shapes = performance.get("shapes") if isinstance(performance, dict) else None
+    if not isinstance(shapes, dict):
+        return None, "performance.shapes is missing"
+
+    latency_by_shape: dict[str, float] = {}
+    for shape_id in shape_ids:
+        shape = shapes.get(shape_id)
+        if not isinstance(shape, dict):
+            return None, f"shape {shape_id!r} has no performance result"
+        if shape.get("error") not in {None, ""}:
+            return None, f"shape {shape_id!r} performance failed: {shape['error']}"
+        samples = shape.get("samples")
+        if not isinstance(samples, list):
+            return None, f"shape {shape_id!r} performance samples are missing"
+        if not samples:
+            return None, f"shape {shape_id!r} has no performance samples"
+        values: list[float] = []
+        for sample_index, sample in enumerate(samples):
+            if not isinstance(sample, dict):
+                return (
+                    None,
+                    f"shape {shape_id!r} performance sample {sample_index} "
+                    "is not an object",
+                )
+            raw_latency = sample.get("end_to_end_time_ms")
+            latency = _positive_finite_float(raw_latency)
+            if latency is None:
+                return (
+                    None,
+                    f"shape {shape_id!r} performance sample {sample_index} has "
+                    f"invalid end_to_end_time_ms: {raw_latency!r}",
+                )
+            values.append(latency)
+        latency_by_shape[shape_id] = float(statistics.median(values))
+    return latency_by_shape, None
+
+
+def _abba_environment_identity(payload: dict[str, object]) -> tuple[object, ...]:
+    environment = payload.get("environment")
+    if not isinstance(environment, dict):
+        return ()
+    fields = (
+        "gpu_name",
+        "gpu_arch",
+        "accelerator_backend",
+        "driver_version",
+        "runtime_version",
+        "PTL_STATE",
+    )
+    return tuple(environment.get(field) for field in fields)
+
+
+def _aggregate_abba_runs(
+    runs: list[dict[str, object]],
+    shape_ids: list[str],
+) -> tuple[dict[str, object] | None, str | None]:
+    """Aggregate a complete ABBA sequence, rejecting partial or failed evidence."""
+    schedule = _abba_schedule()
+    if len(runs) != len(schedule):
+        return None, f"ABBA schedule incomplete: expected 4 runs, got {len(runs)}"
+
+    latency_runs: dict[str, list[dict[str, float]]] = {
+        "baseline": [],
+        "candidate": [],
+    }
+    first_identity: tuple[object, ...] | None = None
+    for expected, row in zip(schedule, runs):
+        actual_step = {
+            key: row.get(key) for key in ("index", "revision", "label", "repeat")
+        }
+        if actual_step != expected:
+            return None, "ABBA runs do not match the required A-B-B-A schedule"
+        result = row.get("result")
+        if not isinstance(result, dict):
+            return None, f"ABBA run {expected['index']} has no evaluation result"
+        if not _payload_overall_passed(result):
+            detail = _first_line(
+                result.get("error") if isinstance(result.get("error"), str) else None
+            )
+            suffix = f": {detail}" if detail else ""
+            return (
+                None,
+                f"ABBA run {expected['index']} ({expected['label']}) did not pass{suffix}",
+            )
+        identity = _abba_environment_identity(result)
+        if first_identity is None:
+            first_identity = identity
+        elif identity != first_identity:
+            return None, "ABBA runs reported different GPU/runtime environments"
+        latencies, latency_error = _abba_run_latency_ms_by_shape(result, shape_ids)
+        if latencies is None:
+            return (
+                None,
+                f"ABBA run {expected['index']} ({expected['label']}): {latency_error}",
+            )
+        latency_runs[str(expected["revision"])].append(latencies)
+
+    summaries: dict[str, dict[str, object]] = {}
+    for revision in ("baseline", "candidate"):
+        measurements = latency_runs[revision]
+        if len(measurements) != 2:
+            return None, f"ABBA {revision} must have exactly two measurements"
+        by_shape: dict[str, float] = {}
+        for shape_id in shape_ids:
+            latency = _geometric_mean(
+                [measurement[shape_id] for measurement in measurements]
+            )
+            if latency is None:
+                return None, f"ABBA {revision} shape {shape_id!r} has invalid latency"
+            by_shape[shape_id] = latency
+        latency_geomean = _geometric_mean(list(by_shape.values()))
+        if latency_geomean is None:
+            return None, f"ABBA {revision} aggregate latency is invalid"
+        summaries[revision] = {
+            "latency_ms_geomean": latency_geomean,
+            "latency_ms_by_shape": by_shape,
+        }
+
+    per_shape: dict[str, dict[str, float]] = {}
+    baseline_by_shape = summaries["baseline"]["latency_ms_by_shape"]
+    candidate_by_shape = summaries["candidate"]["latency_ms_by_shape"]
+    assert isinstance(baseline_by_shape, dict)
+    assert isinstance(candidate_by_shape, dict)
+    for shape_id in shape_ids:
+        baseline_latency = float(baseline_by_shape[shape_id])
+        candidate_latency = float(candidate_by_shape[shape_id])
+        speedup = baseline_latency / candidate_latency
+        per_shape[shape_id] = {
+            "baseline_latency_ms": baseline_latency,
+            "candidate_latency_ms": candidate_latency,
+            "speedup": speedup,
+            "improvement_pct": (speedup - 1.0) * 100.0,
+        }
+
+    baseline_geomean = float(summaries["baseline"]["latency_ms_geomean"])
+    candidate_geomean = float(summaries["candidate"]["latency_ms_geomean"])
+    speedup = baseline_geomean / candidate_geomean
+    return (
+        {
+            "baseline": summaries["baseline"],
+            "candidate": summaries["candidate"],
+            "comparison": {
+                "speedup": speedup,
+                "improvement_pct": (speedup - 1.0) * 100.0,
+                "shapes": per_shape,
+            },
+        },
+        None,
+    )
+
+
+def _build_abba_payload(
+    *,
+    reference_dir: Path,
+    candidate_path: Path,
+    runner_config: dict[str, object],
+    environment: dict[str, object],
+    eval_id: str,
+    runs: list[dict[str, object]],
+    error: str | None = None,
+) -> dict[str, object]:
+    aggregate: dict[str, object] | None = None
+    aggregate_error = error
+    if aggregate_error is None:
+        aggregate, aggregate_error = _aggregate_abba_runs(
+            runs,
+            _shape_ids(reference_dir),
+        )
+    status = "passed" if aggregate_error is None else "failed"
+    abba = {
+        "schedule": _abba_schedule(),
+        "runs": runs,
+        "baseline": aggregate.get("baseline") if aggregate is not None else None,
+        "candidate": aggregate.get("candidate") if aggregate is not None else None,
+        "comparison": aggregate.get("comparison") if aggregate is not None else None,
+    }
+    return {
+        "kernel": _build_kernel(reference_dir),
+        "dsl": infer_target_dsl(candidate_path),
+        "eval_mode": _ABBA_EVAL_MODE,
+        "eval_id": eval_id,
+        "environment": environment,
+        "runner_config": runner_config,
+        "passed": {
+            "abba": {
+                "status": status,
+                "reason": aggregate_error,
+            }
+        },
+        "abba": abba,
+        "error": aggregate_error,
+    }
+
+
+def _write_abba_staging_manifest(
+    *,
+    artifact_dir: Path,
+    baseline_path: Path,
+    candidate_path: Path,
+    reference_dir: Path,
+    runner_config: dict[str, object],
+    environment: dict[str, object],
+) -> None:
+    reference_files = {
+        filename: _manifest_file_entry(reference_dir / filename)
+        for filename in ("reference.py", "input.py", "shapes.json", "metadata.json")
+        if (reference_dir / filename).is_file()
+    }
+    manifest = {
+        "baseline": _manifest_file_entry(baseline_path),
+        "candidate": _manifest_file_entry(candidate_path),
+        "reference_dir": str(reference_dir),
+        "reference_files": reference_files,
+        "runner_config": runner_config,
+        "environment": environment,
+        "schedule": _abba_schedule(),
+    }
+    _save_eval_json(manifest, artifact_dir / "staging_manifest.json")
+
+
+def _run_abba_eval_process(
+    baseline_path: Path,
+    candidate_path: Path,
+    reference_dir: Path,
+    output_root: Path,
+    *,
+    atol: float,
+    rtol: float,
+    num_correctness_cases: int,
+    warmup_iters: int,
+    bench_iters: int,
+    checkpoint_dir: Path | None,
+    timestamp: str,
+    config_version: str,
+    clock_locked: bool,
+    require_clock_locked: bool,
+    collect_kernel_events: bool,
+    candidate_timeout_s: int | float,
+    perf_timeout_s: int | float,
+    compile_timeout_s: int | float,
+    benchmark_mode: str,
+    cuda_graph_cache_flush_mb: int,
+    graph_atol: float,
+    graph_rtol: float,
+    graph_min_cosine: float | None,
+    graph_max_rel_l2: float | None,
+    trust_mode: str,
+) -> dict[str, object]:
+    kernel_name = _kernel_name(reference_dir, candidate_path)
+    artifact_dir, eval_output_path = _build_artifact_paths(
+        output_root=output_root,
+        kernel_name=kernel_name,
+        timestamp=timestamp,
+    )
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    runner_config = _build_runner_config(
+        config_version=config_version,
+        mode=_ABBA_EVAL_MODE,
+        validation_mode=_VALIDATION_MODE_FULL,
+        atol=atol,
+        rtol=rtol,
+        num_correctness_cases=num_correctness_cases,
+        warmup_iters=warmup_iters,
+        bench_iters=bench_iters,
+        candidate_timeout_s=candidate_timeout_s,
+        benchmark_mode=benchmark_mode,
+        cuda_graph_cache_flush_mb=cuda_graph_cache_flush_mb,
+        graph_atol=graph_atol,
+        graph_rtol=graph_rtol,
+        graph_min_cosine=graph_min_cosine,
+        graph_max_rel_l2=graph_max_rel_l2,
+        trust_mode=trust_mode,
+        require_clock_locked=require_clock_locked,
+    )
+    environment = _build_environment(clock_locked=clock_locked)
+    eval_id = _eval_id()
+    runs: list[dict[str, object]] = []
+    initial_payload = _build_abba_payload(
+        reference_dir=reference_dir,
+        candidate_path=candidate_path,
+        runner_config=runner_config,
+        environment=environment,
+        eval_id=eval_id,
+        runs=runs,
+        error=_PENDING_EVAL_REASON,
+    )
+    _save_eval_json(initial_payload, eval_output_path)
+
+    try:
+        _validate_candidate_path(baseline_path)
+        _validate_candidate_path(candidate_path)
+        _resolve_reference_bundle(reference_dir)
+        shutil.copy2(baseline_path, artifact_dir / "baseline.py")
+        _archive_bundle(candidate_path, reference_dir, artifact_dir)
+        staged_baseline_path = artifact_dir / "baseline.py"
+        staged_candidate_path = artifact_dir / "candidate.py"
+        staged_reference_dir = artifact_dir
+        _write_abba_staging_manifest(
+            artifact_dir=artifact_dir,
+            baseline_path=staged_baseline_path,
+            candidate_path=staged_candidate_path,
+            reference_dir=staged_reference_dir,
+            runner_config=runner_config,
+            environment=environment,
+        )
+    except Exception:
+        failure_payload = _build_abba_payload(
+            reference_dir=reference_dir,
+            candidate_path=candidate_path,
+            runner_config=runner_config,
+            environment=environment,
+            eval_id=eval_id,
+            runs=runs,
+            error=traceback.format_exc(),
+        )
+        _save_eval_json(failure_payload, eval_output_path)
+        return failure_payload
+
+    # Execute immutable snapshots for every leg. A caller may replace either
+    # source path while a long ABBA sequence is running; mixing revisions would
+    # invalidate the comparison even though the order itself still says ABBA.
+    paths = {
+        "baseline": staged_baseline_path,
+        "candidate": staged_candidate_path,
+    }
+    for step in _abba_schedule():
+        revision = str(step["revision"])
+        run_dir = artifact_dir / "abba_runs" / (
+            f"{int(step['index']):02d}-{revision}"
+        )
+        _log(
+            f"[eval] ABBA step={step['index']} label={step['label']} "
+            f"revision={revision}"
+        )
+        result = _run_eval_process(
+            input_path=paths[revision],
+            reference_dir=staged_reference_dir,
+            output_root=output_root,
+            atol=atol,
+            rtol=rtol,
+            num_correctness_cases=num_correctness_cases,
+            warmup_iters=warmup_iters,
+            bench_iters=bench_iters,
+            checkpoint_dir=checkpoint_dir,
+            timestamp=timestamp,
+            config_version=config_version,
+            clock_locked=clock_locked,
+            require_clock_locked=require_clock_locked,
+            collect_kernel_events=collect_kernel_events,
+            candidate_timeout_s=candidate_timeout_s,
+            perf_timeout_s=perf_timeout_s,
+            compile_timeout_s=compile_timeout_s,
+            benchmark_mode=benchmark_mode,
+            cuda_graph_cache_flush_mb=cuda_graph_cache_flush_mb,
+            graph_atol=graph_atol,
+            graph_rtol=graph_rtol,
+            graph_min_cosine=graph_min_cosine,
+            graph_max_rel_l2=graph_max_rel_l2,
+            trust_mode=trust_mode,
+            validation_mode=_VALIDATION_MODE_FULL,
+            artifact_dir_override=run_dir,
+        )
+        runs.append(
+            {
+                **step,
+                "artifact": str((run_dir / "eval_result.json").relative_to(artifact_dir)),
+                "result": result,
+            }
+        )
+        partial_error = (
+            None if len(runs) == len(_abba_schedule()) else _PENDING_EVAL_REASON
+        )
+        payload = _build_abba_payload(
+            reference_dir=staged_reference_dir,
+            candidate_path=staged_candidate_path,
+            runner_config=runner_config,
+            environment=environment,
+            eval_id=eval_id,
+            runs=runs,
+            error=partial_error,
+        )
+        _save_eval_json(payload, eval_output_path)
+    return payload
+
+
 def _run_eval_process(
     input_path: Path,
     reference_dir: Path,
@@ -3020,18 +3456,23 @@ def _run_eval_process(
     graph_max_rel_l2: float | None = None,
     trust_mode: str = _TRUST_MODE_TRUSTED,
     validation_mode: str = _VALIDATION_MODE_FULL,
+    artifact_dir_override: Path | None = None,
 ) -> dict[str, object]:
     """Run the full pipeline; always persist a valid eval_result.json."""
     input_path = input_path.resolve()
     reference_dir = reference_dir.resolve()
     output_root = output_root.resolve()
     resolved_timestamp = get_timestamp(timestamp)
-    kernel_name = _kernel_name(reference_dir, input_path)
-    artifact_dir, eval_output_path = _build_artifact_paths(
-        output_root=output_root,
-        kernel_name=kernel_name,
-        timestamp=resolved_timestamp,
-    )
+    if artifact_dir_override is None:
+        kernel_name = _kernel_name(reference_dir, input_path)
+        artifact_dir, eval_output_path = _build_artifact_paths(
+            output_root=output_root,
+            kernel_name=kernel_name,
+            timestamp=resolved_timestamp,
+        )
+    else:
+        artifact_dir = artifact_dir_override.resolve()
+        eval_output_path = artifact_dir / "eval_result.json"
     artifact_dir.mkdir(parents=True, exist_ok=True)
     worker_environment = _torch_extension_worker_environment(artifact_dir)
 
@@ -3453,6 +3894,126 @@ def run_torch_compile_eval(
     )
 
 
+def run_abba_eval(
+    baseline_path: Path,
+    candidate_path: Path,
+    reference_dir: Path,
+    output_root: Path,
+    *,
+    atol: float = 1e-2,
+    rtol: float = 0.05,
+    num_correctness_cases: int = 1,
+    warmup_iters: int = 10,
+    bench_iters: int = 100,
+    checkpoint_dir: Path | None = None,
+    timestamp: str | None = None,
+    config_version: str = _DEFAULT_CONFIG_VERSION,
+    clock_locked: bool = False,
+    require_clock_locked: bool = False,
+    collect_kernel_events: bool = True,
+    candidate_timeout_s: int | float = 60,
+    perf_timeout_s: int | float = 600,
+    compile_timeout_s: int | float = _DEFAULT_COMPILE_TIMEOUT_S,
+    benchmark_mode: str = "eager",
+    cuda_graph_cache_flush_mb: int = 1024,
+    graph_atol: float = 1e-2,
+    graph_rtol: float = 0.05,
+    graph_min_cosine: float | None = None,
+    graph_max_rel_l2: float | None = None,
+    trust_mode: str = _TRUST_MODE_TRUSTED,
+    clock_lock_config: ClockLockConfig | None = None,
+) -> dict[str, object]:
+    """Run a complete A-B-B-A comparison under one optional clock lock."""
+    baseline_path = baseline_path.resolve()
+    candidate_path = candidate_path.resolve()
+    reference_dir = reference_dir.resolve()
+    output_root = output_root.resolve()
+    resolved_timestamp = get_timestamp(timestamp)
+    resolved_clock_config = _public_clock_lock_config(
+        clock_lock_config,
+        clock_locked=clock_locked,
+        require_clock_locked=require_clock_locked,
+    )
+    kernel_name = _kernel_name(reference_dir, candidate_path)
+    artifact_dir, eval_output_path = _build_artifact_paths(
+        output_root=output_root,
+        kernel_name=kernel_name,
+        timestamp=resolved_timestamp,
+    )
+
+    def build_failure_payload(error: str) -> dict[str, object]:
+        runner_config = _build_runner_config(
+            config_version=config_version,
+            mode=_ABBA_EVAL_MODE,
+            validation_mode=_VALIDATION_MODE_FULL,
+            atol=atol,
+            rtol=rtol,
+            num_correctness_cases=num_correctness_cases,
+            warmup_iters=warmup_iters,
+            bench_iters=bench_iters,
+            candidate_timeout_s=candidate_timeout_s,
+            benchmark_mode=benchmark_mode,
+            cuda_graph_cache_flush_mb=cuda_graph_cache_flush_mb,
+            graph_atol=graph_atol,
+            graph_rtol=graph_rtol,
+            graph_min_cosine=graph_min_cosine,
+            graph_max_rel_l2=graph_max_rel_l2,
+            trust_mode=trust_mode,
+            require_clock_locked=True,
+        )
+        return _build_abba_payload(
+            reference_dir=reference_dir,
+            candidate_path=candidate_path,
+            runner_config=runner_config,
+            environment=_build_environment(clock_locked=False),
+            eval_id=_eval_id(),
+            runs=[],
+            error=error,
+        )
+
+    def evaluate(
+        effective_clock_locked: bool,
+        effective_require_clock_locked: bool,
+    ) -> dict[str, object]:
+        return _run_abba_eval_process(
+            baseline_path=baseline_path,
+            candidate_path=candidate_path,
+            reference_dir=reference_dir,
+            output_root=output_root,
+            atol=atol,
+            rtol=rtol,
+            num_correctness_cases=num_correctness_cases,
+            warmup_iters=warmup_iters,
+            bench_iters=bench_iters,
+            checkpoint_dir=checkpoint_dir,
+            timestamp=resolved_timestamp,
+            config_version=config_version,
+            clock_locked=effective_clock_locked,
+            require_clock_locked=effective_require_clock_locked,
+            collect_kernel_events=collect_kernel_events,
+            candidate_timeout_s=candidate_timeout_s,
+            perf_timeout_s=perf_timeout_s,
+            compile_timeout_s=compile_timeout_s,
+            benchmark_mode=benchmark_mode,
+            cuda_graph_cache_flush_mb=cuda_graph_cache_flush_mb,
+            graph_atol=graph_atol,
+            graph_rtol=graph_rtol,
+            graph_min_cosine=graph_min_cosine,
+            graph_max_rel_l2=graph_max_rel_l2,
+            trust_mode=trust_mode,
+        )
+
+    return _evaluate_with_clock_policy(
+        config=resolved_clock_config,
+        clock_locked=clock_locked,
+        require_clock_locked=require_clock_locked,
+        artifact_dir=artifact_dir,
+        eval_output_path=eval_output_path,
+        build_failure_payload=build_failure_payload,
+        evaluate=evaluate,
+    )
+
+
 def run_eval(
     input_path: Path,
     reference_dir: Path,
@@ -3601,6 +4162,16 @@ def _payload_overall_passed(payload: dict[str, object]) -> bool:
     if not isinstance(passed_block, dict):
         return False
 
+    if payload.get("eval_mode") == _ABBA_EVAL_MODE:
+        abba_status = passed_block.get("abba")
+        abba = payload.get("abba")
+        return (
+            isinstance(abba_status, dict)
+            and abba_status.get("status") == "passed"
+            and isinstance(abba, dict)
+            and isinstance(abba.get("comparison"), dict)
+        )
+
     # Per-shape compile: every shape must have status "passed".
     compile_block = passed_block.get("compile", {})
     if not isinstance(compile_block, dict) or not compile_block:
@@ -3655,6 +4226,15 @@ def main() -> None:
         type=Path,
         default=None,
         help="Path to the candidate Python file exposing Model",
+    )
+    parser.add_argument(
+        "--baseline-input",
+        type=Path,
+        default=None,
+        help=(
+            "Path to the baseline Python file exposing Model. Supplying it "
+            "selects the A-B-B-A comparison mode; --input is candidate B."
+        ),
     )
     parser.add_argument(
         "--reference-dir",
@@ -3995,6 +4575,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     cli_validation_mode = args.validation_mode
+    cli_baseline_input = args.baseline_input
 
     try:
         runner_file_config = _load_runner_config_file(args.config)
@@ -4004,6 +4585,11 @@ def main() -> None:
         args.input = _resolve_path_option(
             "input",
             cli_value=args.input,
+            config=runner_file_config,
+        )
+        args.baseline_input = _resolve_path_option(
+            "baseline_input",
+            cli_value=args.baseline_input,
             config=runner_file_config,
         )
         args.reference_dir = _resolve_path_option(
@@ -4021,7 +4607,11 @@ def main() -> None:
             cli_value=args.checkpoint_dir,
             config=runner_file_config,
         )
-        eval_mode = _resolve_eval_mode(args.torch_compile, runner_file_config)
+        eval_mode = _resolve_eval_mode(
+            args.torch_compile,
+            cli_baseline_input,
+            runner_file_config,
+        )
         args.torch_compile = eval_mode == _TORCH_COMPILE_EVAL_MODE
         args.validation_mode = _resolve_validation_mode(
             cli_validation_mode,
@@ -4043,6 +4633,18 @@ def main() -> None:
             "torch_compile_reference requires validation_mode=performance_only "
             "when validation_mode is set in config."
         )
+    if args.torch_compile and args.baseline_input is not None:
+        raise SystemExit("--baseline-input cannot be combined with --torch-compile.")
+    if eval_mode == _ABBA_EVAL_MODE:
+        if args.baseline_input is None:
+            raise SystemExit(
+                "baseline_input is required via --baseline-input or config "
+                "for ABBA eval mode."
+            )
+        if args.validation_mode != _VALIDATION_MODE_FULL:
+            raise SystemExit("ABBA eval mode requires validation_mode=full.")
+    elif args.baseline_input is not None:
+        raise SystemExit("baseline_input requires eval_mode=abba.")
     if args.reference_dir is None:
         raise SystemExit("reference_dir is required via --reference-dir or config.")
 
@@ -4348,6 +4950,55 @@ def main() -> None:
             perf_timeout_s=args.perf_timeout_s,
         )
         kernel_name = _kernel_name(args.reference_dir, args.reference_dir / "reference.py")
+        _, eval_output_path = _build_artifact_paths(
+            output_root=args.output,
+            kernel_name=kernel_name,
+            timestamp=timestamp,
+        )
+        if args.sdk_result_path_output is not None:
+            _save_text_atomic(
+                str(eval_output_path.resolve()),
+                args.sdk_result_path_output,
+            )
+        print(f"[OUTPUT] {eval_output_path}")
+        raise SystemExit(0 if _payload_overall_passed(payload) else 1)
+
+    if eval_mode == _ABBA_EVAL_MODE:
+        if args.input is None:
+            raise SystemExit(
+                "input is required via --input or config for ABBA eval mode."
+            )
+        assert args.baseline_input is not None
+        timestamp = get_timestamp()
+        payload = run_abba_eval(
+            baseline_path=args.baseline_input,
+            candidate_path=args.input,
+            reference_dir=args.reference_dir,
+            output_root=args.output,
+            atol=args.atol,
+            rtol=args.rtol,
+            num_correctness_cases=args.num_correctness_cases,
+            warmup_iters=args.warmup_iters,
+            bench_iters=args.bench_iters,
+            checkpoint_dir=args.checkpoint_dir,
+            timestamp=timestamp,
+            config_version=args.config_version,
+            clock_locked=args.clock_locked,
+            require_clock_locked=args.require_clock_locked,
+            clock_lock_config=clock_lock_config,
+            collect_kernel_events=not args.skip_kernel_attribution,
+            candidate_timeout_s=args.candidate_timeout_s,
+            perf_timeout_s=args.perf_timeout_s,
+            compile_timeout_s=args.compile_timeout_s,
+            benchmark_mode=args.benchmark_mode,
+            cuda_graph_cache_flush_mb=args.cuda_graph_cache_flush_mb,
+            graph_atol=args.graph_atol,
+            graph_rtol=args.graph_rtol,
+            graph_min_cosine=args.graph_min_cosine,
+            graph_max_rel_l2=args.graph_max_rel_l2,
+            trust_mode=args.trust_mode,
+        )
+        kernel_name = _kernel_name(args.reference_dir, args.input)
         _, eval_output_path = _build_artifact_paths(
             output_root=args.output,
             kernel_name=kernel_name,

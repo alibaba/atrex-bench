@@ -306,6 +306,228 @@ def test_torch_compile_process_records_performance_only_mode(
     assert payload["runner_config"]["validation_mode"] == "performance_only"
 
 
+def _passing_abba_run(latencies: dict[str, list[float]]) -> dict[str, object]:
+    shape_status = {
+        shape_id: {"status": "passed", "reason": None} for shape_id in latencies
+    }
+    return {
+        "eval_mode": "candidate",
+        "error": None,
+        "environment": {
+            "gpu_name": "test-gpu",
+            "gpu_arch": "test-arch",
+            "accelerator_backend": "cuda",
+            "driver_version": "1",
+            "runtime_version": "2",
+            "PTL_STATE": None,
+        },
+        "runner_config": {"validation_mode": "full"},
+        "passed": {
+            "compile": shape_status,
+            "correctness": shape_status,
+            "performance": shape_status,
+        },
+        "performance": {
+            "shapes": {
+                shape_id: {
+                    "samples": [
+                        {"end_to_end_time_ms": latency} for latency in samples
+                    ],
+                    "error": None,
+                }
+                for shape_id, samples in latencies.items()
+            }
+        },
+    }
+
+
+def test_aggregate_abba_runs_uses_median_then_geometric_mean() -> None:
+    from scripts import run_eval as run_eval_module
+
+    payloads = [
+        _passing_abba_run({"0": [10.0, 14.0], "1": [18.0, 22.0]}),
+        _passing_abba_run({"0": [5.0, 7.0], "1": [9.0, 11.0]}),
+        _passing_abba_run({"0": [7.0, 9.0], "1": [9.0, 11.0]}),
+        _passing_abba_run({"0": [14.0, 18.0], "1": [18.0, 22.0]}),
+    ]
+    runs = [
+        {**step, "result": payload}
+        for step, payload in zip(run_eval_module._abba_schedule(), payloads)
+    ]
+
+    aggregate, error = run_eval_module._aggregate_abba_runs(runs, ["0", "1"])
+
+    assert error is None
+    assert aggregate is not None
+    assert aggregate["baseline"]["latency_ms_by_shape"]["0"] == pytest.approx(
+        math.sqrt(12.0 * 16.0)
+    )
+    assert aggregate["candidate"]["latency_ms_by_shape"]["0"] == pytest.approx(
+        math.sqrt(6.0 * 8.0)
+    )
+    comparison = aggregate["comparison"]
+    assert comparison["speedup"] == pytest.approx(2.0)
+    assert comparison["improvement_pct"] == pytest.approx(100.0)
+    assert comparison["shapes"]["0"]["speedup"] == pytest.approx(2.0)
+    assert comparison["shapes"]["1"]["speedup"] == pytest.approx(2.0)
+
+
+def test_aggregate_abba_runs_rejects_failed_or_reordered_run() -> None:
+    from scripts import run_eval as run_eval_module
+
+    payloads = [_passing_abba_run({"0": [1.0]}) for _ in range(4)]
+    payloads[1]["error"] = "candidate failed"
+    runs = [
+        {**step, "result": payload}
+        for step, payload in zip(run_eval_module._abba_schedule(), payloads)
+    ]
+
+    aggregate, error = run_eval_module._aggregate_abba_runs(runs, ["0"])
+
+    assert aggregate is None
+    assert error == "ABBA run 1 (B) did not pass: candidate failed"
+
+    runs[1]["revision"] = "baseline"
+    aggregate, error = run_eval_module._aggregate_abba_runs(runs, ["0"])
+    assert aggregate is None
+    assert error == "ABBA runs do not match the required A-B-B-A schedule"
+
+
+@pytest.mark.parametrize(
+    ("invalid_sample", "reason"),
+    [
+        pytest.param(
+            {"end_to_end_time_ms": 0.0},
+            "invalid end_to_end_time_ms: 0.0",
+            id="zero",
+        ),
+        pytest.param(
+            {"end_to_end_time_ms": -1.0},
+            "invalid end_to_end_time_ms: -1.0",
+            id="negative",
+        ),
+        pytest.param(
+            {"end_to_end_time_ms": None},
+            "invalid end_to_end_time_ms: None",
+            id="none",
+        ),
+        pytest.param(
+            {"end_to_end_time_ms": float("nan")},
+            "invalid end_to_end_time_ms: nan",
+            id="nan",
+        ),
+        pytest.param(
+            {"end_to_end_time_ms": float("inf")},
+            "invalid end_to_end_time_ms: inf",
+            id="infinite",
+        ),
+        pytest.param(
+            {},
+            "invalid end_to_end_time_ms: None",
+            id="missing-latency",
+        ),
+        pytest.param(None, "is not an object", id="malformed-sample"),
+    ],
+)
+def test_aggregate_abba_runs_rejects_any_invalid_timing_sample(
+    invalid_sample: object,
+    reason: str,
+) -> None:
+    from scripts import run_eval as run_eval_module
+
+    payloads = [_passing_abba_run({"0": [2.0]}) for _ in range(4)]
+    samples = payloads[1]["performance"]["shapes"]["0"]["samples"]
+    samples.append(invalid_sample)
+    runs = [
+        {**step, "result": payload}
+        for step, payload in zip(run_eval_module._abba_schedule(), payloads)
+    ]
+
+    aggregate, error = run_eval_module._aggregate_abba_runs(runs, ["0"])
+
+    assert aggregate is None
+    assert error is not None
+    assert error.startswith("ABBA run 1 (B): shape '0' performance sample 1")
+    assert reason in error
+
+
+def test_run_abba_process_executes_isolated_abba_schedule(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import run_eval as run_eval_module
+
+    reference_dir = _build_reference_dir(tmp_path / "reference")
+    baseline_path = _write_candidate_file(
+        tmp_path, "baseline.py", "class Model:\n    pass\n"
+    ).resolve()
+    candidate_path = _write_candidate_file(
+        tmp_path, "candidate.py", "class Model:\n    pass\n"
+    ).resolve()
+    calls: list[tuple[Path, Path]] = []
+
+    def fake_run_eval_process(*, input_path: Path, artifact_dir_override: Path, **_kwargs):
+        calls.append((input_path, artifact_dir_override))
+        latency = 2.0 if input_path.name == "baseline.py" else 1.0
+        return _passing_abba_run({"0": [latency]})
+
+    monkeypatch.setattr(run_eval_module, "_run_eval_process", fake_run_eval_process)
+    monkeypatch.setattr(
+        run_eval_module,
+        "_build_environment",
+        lambda **_kwargs: _passing_abba_run({"0": [1.0]})["environment"],
+    )
+
+    payload = run_eval_module._run_abba_eval_process(
+        baseline_path=baseline_path,
+        candidate_path=candidate_path,
+        reference_dir=reference_dir.resolve(),
+        output_root=(tmp_path / "output").resolve(),
+        atol=1e-2,
+        rtol=0.05,
+        num_correctness_cases=1,
+        warmup_iters=10,
+        bench_iters=100,
+        checkpoint_dir=None,
+        timestamp="20260915-000000",
+        config_version="v1",
+        clock_locked=False,
+        require_clock_locked=False,
+        collect_kernel_events=False,
+        candidate_timeout_s=60,
+        perf_timeout_s=600,
+        compile_timeout_s=300,
+        benchmark_mode="eager",
+        cuda_graph_cache_flush_mb=1024,
+        graph_atol=1e-2,
+        graph_rtol=0.05,
+        graph_min_cosine=None,
+        graph_max_rel_l2=None,
+        trust_mode="trusted",
+    )
+
+    artifact_dir = tmp_path / "output" / "20260915-000000" / "atrex_001"
+    assert [path for path, _run_dir in calls] == [
+        artifact_dir / "baseline.py",
+        artifact_dir / "candidate.py",
+        artifact_dir / "candidate.py",
+        artifact_dir / "baseline.py",
+    ]
+    assert [run_dir.name for _path, run_dir in calls] == [
+        "00-baseline",
+        "01-candidate",
+        "02-candidate",
+        "03-baseline",
+    ]
+    assert payload["eval_mode"] == "abba"
+    assert payload["passed"]["abba"]["status"] == "passed"
+    assert payload["abba"]["comparison"]["speedup"] == pytest.approx(2.0)
+    assert (artifact_dir / "baseline.py").is_file()
+    assert (artifact_dir / "candidate.py").is_file()
+    saved = json.loads((artifact_dir / "eval_result.json").read_text(encoding="utf-8"))
+    assert saved["abba"]["comparison"]["improvement_pct"] == pytest.approx(100.0)
+
+
 def test_run_eval_serializes_cuda_graph_metadata() -> None:
     from scripts import run_eval as run_eval_module
 
@@ -1216,6 +1438,86 @@ def test_config_torch_compile_rejects_non_performance_validation_mode(
         run_eval_module.main()
 
 
+def test_cli_baseline_input_selects_abba_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from scripts import run_eval as run_eval_module
+
+    reference_dir = _build_reference_dir(tmp_path / "reference")
+    baseline_path = _write_candidate_file(
+        tmp_path, "baseline.py", "class Model:\n    pass\n"
+    )
+    candidate_path = _write_candidate_file(
+        tmp_path, "candidate.py", "class Model:\n    pass\n"
+    )
+    output_root = tmp_path / "output"
+    calls: list[dict[str, object]] = []
+
+    def fake_run_abba_eval(**kwargs):
+        calls.append(kwargs)
+        return {
+            "eval_mode": "abba",
+            "error": None,
+            "passed": {"abba": {"status": "passed", "reason": None}},
+            "abba": {"comparison": {"speedup": 1.1}},
+        }
+
+    monkeypatch.setattr(run_eval_module, "run_abba_eval", fake_run_abba_eval)
+    monkeypatch.setattr(run_eval_module, "get_timestamp", lambda *_args: "stamp")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_eval.py",
+            "--input",
+            str(candidate_path),
+            "--baseline-input",
+            str(baseline_path),
+            "--reference-dir",
+            str(reference_dir),
+            "--output",
+            str(output_root),
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exit_info:
+        run_eval_module.main()
+
+    assert exit_info.value.code == 0
+    assert len(calls) == 1
+    assert calls[0]["baseline_path"] == baseline_path
+    assert calls[0]["candidate_path"] == candidate_path
+    assert "[OUTPUT]" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("argv", "message"),
+    [
+        (
+            ["--baseline-input", "baseline.py", "--performance-only"],
+            "requires validation_mode=full",
+        ),
+        (
+            ["--torch-compile", "--baseline-input", "baseline.py"],
+            "cannot be combined",
+        ),
+    ],
+)
+def test_cli_rejects_incompatible_abba_modes(
+    monkeypatch: pytest.MonkeyPatch,
+    argv: list[str],
+    message: str,
+) -> None:
+    from scripts import run_eval as run_eval_module
+
+    monkeypatch.setattr(sys, "argv", ["run_eval.py", *argv])
+
+    with pytest.raises(SystemExit, match=message):
+        run_eval_module.main()
+
+
 def test_torch_compile_rejects_candidate_validation_only_flags(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1559,6 +1861,71 @@ def test_managed_mode_runs_only_in_parent(
     assert process_calls[0]["clock_locked"] is True
     assert process_calls[0]["require_clock_locked"] is True
     assert "clock_lock_config" not in process_calls[0]
+
+
+def test_abba_managed_mode_owns_one_parent_lifecycle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from atrex_bench.eval.clock_lock import ClockLockConfig
+    from scripts import run_eval as run_eval_module
+
+    lifecycle_events: list[str] = []
+    process_calls: list[dict[str, object]] = []
+
+    class CountingSession:
+        def __init__(self) -> None:
+            self.report = _managed_clock_report(verified=True, restored=True)
+
+        def __enter__(self):
+            lifecycle_events.append("enter")
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            lifecycle_events.append("exit")
+            return False
+
+    monkeypatch.setattr(
+        run_eval_module,
+        "_build_managed_clock_session",
+        lambda **_kwargs: CountingSession(),
+    )
+    monkeypatch.setattr(
+        run_eval_module,
+        "_run_abba_eval_process",
+        lambda *args, **kwargs: (
+            lifecycle_events.append("evaluate")
+            or process_calls.append(kwargs)
+            or {
+                "eval_mode": "abba",
+                "error": None,
+                "passed": {"abba": {"status": "passed", "reason": None}},
+                "abba": {"comparison": {"speedup": 1.0}},
+            }
+        ),
+    )
+    config = ClockLockConfig(
+        mode="manage",
+        device_selector="GPU-aabb",
+        graphics_mhz=1500,
+        memory_mhz=3996,
+        settle_seconds=0,
+    )
+
+    payload = run_eval_module.run_abba_eval(
+        Path("baseline.py"),
+        Path("candidate.py"),
+        Path("reference"),
+        tmp_path / "output",
+        timestamp="20260801-000000",
+        clock_lock_config=config,
+    )
+
+    assert payload["environment"]["clock_lock_verified"] is True
+    assert lifecycle_events == ["enter", "evaluate", "exit"]
+    assert len(process_calls) == 1
+    assert process_calls[0]["clock_locked"] is True
+    assert process_calls[0]["require_clock_locked"] is True
 
 
 def test_torch_compile_managed_mode_owns_one_parent_lifecycle(
