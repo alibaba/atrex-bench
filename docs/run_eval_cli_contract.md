@@ -137,7 +137,105 @@ For manual shards, download each native `eval_result.json` artifact and pass the
 paths to `merge_evaluation_shards`. The files must cover the entire original
 shape set. A partial report alone is not a full-operator result. Deployments can
 check `atrex_bench.SHAPE_SHARD_SCHEMA_VERSION == "v1"` and the presence of
-`merge_evaluation_shards` before enabling fanout.
+`merge_evaluation_shards` before accepting manual shards. Automatic Ray Data
+distribution also requires the capability described below.
+
+### Automatic Ray Data distribution
+
+The installed CLI owns automatic shape splitting, GPU worker placement, and
+merging. The wrapper `scripts/run_eval.py` and the unchanged `evaluate(config)`
+SDK invoke this same CLI. Local execution remains the default. Install the
+optional `atrex-bench[ray]` dependency in the driver and GPU worker image, and
+run the driver inside an existing Ray cluster:
+
+```bash
+python scripts/run_eval.py --distribution ray_data --ray-max-workers 4 \
+  --ray-shapes-per-shard 1 --input candidate.py --reference-dir operator \
+  --output results/distributed
+```
+
+The equivalent SDK config is:
+
+```python
+from atrex_bench import evaluate
+
+report = evaluate({
+    "distribution": "ray_data",
+    "ray_max_workers": 4,
+    "ray_shapes_per_shard": 1,
+    "input": "/abs/candidate.py",
+    "reference_dir": "/abs/operator",
+    "output": "/abs/results",
+})
+```
+
+| Config field | Default | Meaning |
+|---|---|---|
+| `distribution` | `local` | `local` or `ray_data`. |
+| `ray_max_workers` | `4` | Maximum concurrent one-GPU actors, integer `1..31`. Actual maximum is capped by the shard count. |
+| `ray_shapes_per_shard` | `1` | Positive number of consecutive original shape IDs per dataset row. |
+| `ray_resources` | `{}` | Ray custom resource requirements for workers and the CPU registry; positive numbers, excluding `CPU` and `GPU`. |
+| `ray_node_selector` | `{}` | Ray `label_selector` mapping for those actors. |
+| `ray_namespace` | Generated | Optional standalone Ray namespace. Gateway `AGATE_RAY_NAMESPACE` overrides this field to isolate attempts. |
+
+The driver connects with `ray.init(address="auto")` and needs no GPU. Dataset
+rows carry stable shard IDs and the original string-sorted shape IDs. The
+actor pool reserves one GPU per worker, bounds its size by `ray_max_workers`,
+and allows one task in flight per actor. Each row calls `evaluate` with
+`distribution="local"` in fresh subprocesses. A worker can process multiple
+shards sequentially; model state and evaluator subprocesses are not reused.
+Candidate full/correctness-only/performance-only, Torch compile, and ABBA use
+the same local harness. ABBA executes A-B-B-A within each shard and merges
+corresponding legs before computing global speedups. Managed clock locking
+runs on the actor's assigned GPU and covers that shard's whole local run.
+
+Before creating workers, the driver snapshots the full reference directory,
+candidate/baseline files, adjacent Python/text/CUDA sources, adjacent Python
+packages, and the complete evaluator Python package. Every actor validates the
+snapshot hashes and writes it into its own temporary directory. This also works
+when the benchmark wheel is installed only in the driver: the actor bootstrap
+is serialized by value and imports the SDK after materializing the package.
+Native Python dependencies, Torch, CUDA/ROCm, and DSL toolchains must already be
+installed in compatible driver/worker images. Adjacent `requirements.txt` is
+transported as evidence; workers do not install it. Driver-local dependency
+directories and arbitrary native site-packages are not transported. Ray Data
+requires `ray[data]>=2.54,<2.57`, including its pandas/PyArrow dependencies.
+
+Automatic distribution requires the complete shape set. Explicit `shape_ids`
+uses `distribution="local"` and the manual merge API. Omit
+`clock_lock_device`: Ray assigns each actor's visible GPU. A relative
+`checkpoint_dir` remains worker-local; absolute driver checkpoint paths are
+rejected. The driver persists one final `eval_result.json` and the normal SDK
+output pointer. Per-shard files and checkpoints remain temporary worker files;
+their input seeds and environment evidence are retained in the native report.
+
+Missing, duplicate, or incompatible shard results fail the distributed run.
+Normal compile/correctness/performance failures remain in the merged report
+and produce the usual failed verdict. Ray actor/task retries are disabled;
+an external caller can retry the entire evaluation. The final native report
+has full `shape_selection` coverage and a `distribution` block with `mode`,
+logical `max_workers`, `shard_count`, source snapshot hash, namespace, driver
+job ID, and worker actor IDs. The capability marker is
+`atrex_bench.ray_data.RAY_DATA_DISTRIBUTION_SCHEMA_VERSION == "v1"`.
+
+Workers and the registry belong to the driver job and are not detached. On
+success or failure the driver kills and confirms registered actors before
+disconnecting. Every evaluator subprocess has a POSIX lifetime supervisor:
+actor death closes its pipe, then signals escalate through INT and TERM to
+KILL within about four seconds; a separate watchdog also kills surviving
+members of the subprocess group when the direct process exits. The report's
+`worker_exit_grace_s=8` tells an external scheduler to retain GPU reservations
+after Ray children become terminal. A separate janitor removes each actor's
+private source/checkpoint directory six seconds after actor death, including
+when a force kill bypasses Python finalizers. A hard driver stop alone is not evidence
+of GPU cleanup: the scheduler must verify all namespace actors/tasks are
+terminal and apply that grace interval. Detached candidate sessions and
+uninterruptible kernel states are outside this process cleanup contract.
+
+With a compatible Gateway deployment, ordinary `agate eval` can select this
+mode automatically. `--shape-shards 1` selects serial execution and
+`--shape-shards N` caps the worker budget. Deployment policy and runtime image
+validation must enable it first; no parallel speedup is implied by local tests.
 
 ## 4. Recommended General Options
 

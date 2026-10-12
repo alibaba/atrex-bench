@@ -17,10 +17,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+ray = [
+    "ray[data]>=2.54,<2.57",
+]
 gpu = [
     "triton",
 ]
 dev = [
+    "cloudpickle>=2.2",
     "pytest",
     "ruff",
 ]

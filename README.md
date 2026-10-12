@@ -254,6 +254,22 @@ settings, hardware, toolchain, and seeds. See the
 [shape shard contract and Gateway examples](docs/run_eval_cli_contract.md#explicit-shape-shards-and-offline-merging)
 for `agate eval --shape-shards` and manual subset usage.
 
+Inside an existing Ray cluster, Atrex-Bench can split the complete shape set
+and merge the report automatically:
+
+```bash
+python scripts/run_eval.py --distribution ray_data --ray-max-workers 4 \
+  --ray-shapes-per-shard 1 --input candidate.py --reference-dir data/attention_forward \
+  --output results/distributed
+```
+
+The same options work in `evaluate(config)`. The CPU driver snapshots the full
+reference and evaluator sources; bounded Ray Data actors each reserve one GPU
+and run the ordinary evaluator in fresh subprocesses. Install
+`atrex-bench[ray]` with matching native dependencies in the driver and worker
+images. See the [Ray Data runtime and cleanup contract](docs/run_eval_cli_contract.md#automatic-ray-data-distribution)
+for file transport, clock locking, ABBA, and lifecycle requirements.
+
 ## Repository Layout
 
 ```text

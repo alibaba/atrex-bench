@@ -132,6 +132,12 @@ _RUNNER_CONFIG_KEYS = frozenset(
         "input",
         "baseline_input",
         "shape_ids",
+        "distribution",
+        "ray_max_workers",
+        "ray_shapes_per_shard",
+        "ray_resources",
+        "ray_node_selector",
+        "ray_namespace",
         "reference_dir",
         "output",
         "checkpoint_dir",
@@ -792,7 +798,12 @@ def _run_subprocess_with_live_stderr(
     clean up its own separately grouped children before the SIGKILL fallback.
     """
     started_at = time.monotonic()
-    process = subprocess.Popen(
+    popen = subprocess.Popen
+    if "ATREX_BENCH_RAY_LIFETIME_FD" in os.environ:
+        from atrex_bench._process_guard import supervised_popen
+
+        popen = supervised_popen
+    process = popen(
         cmd,
         cwd=cwd,
         stdout=subprocess.PIPE,
@@ -4663,6 +4674,14 @@ def main() -> None:
         "--shape-ids", default=None,
         help="Comma-separated original shape IDs or @JSON/text file; omitted selects all",
     )
+    parser.add_argument("--distribution", choices=("local", "ray_data"), default=None,
+                        help="Local evaluation or optional Ray Data shape distribution")
+    parser.add_argument("--ray-max-workers", type=int, default=None,
+                        help="Maximum Ray GPU workers (1-31, default 4)")
+    parser.add_argument("--ray-shapes-per-shard", type=int, default=None,
+                        help="Original shapes per Ray work item (default 1)")
+    parser.add_argument("--ray-namespace", default=None,
+                        help="Standalone Ray namespace; gateway attempt namespace takes precedence")
     args = parser.parse_args()
     cli_validation_mode = args.validation_mode
     cli_baseline_input = args.baseline_input
@@ -4924,6 +4943,46 @@ def main() -> None:
     )
     if args.trust_mode not in {_TRUST_MODE_TRUSTED, _TRUST_MODE_UNTRUSTED}:
         raise SystemExit("trust_mode must be one of: trusted, untrusted")
+    from atrex_bench.ray_data import evaluate_ray_data, validate_distribution
+
+    distributed_config = dict(runner_file_config)
+    for name in _RUNNER_CONFIG_KEYS:
+        value = getattr(args, name, None)
+        if value is not None:
+            distributed_config[name] = str(value) if isinstance(value, Path) else value
+    distributed_config["eval_mode"] = eval_mode
+    distributed_config["clock_lock_mode"] = clock_lock_config.mode
+    try:
+        distribution = validate_distribution(distributed_config)
+    except (TypeError, ValueError) as error:
+        raise SystemExit(str(error)) from error
+    worker_mode = (args.worker or args.single_shape_worker or args.torch_compile_worker
+                   or args.torch_compile_shape_worker)
+    if distribution == "ray_data":
+        if worker_mode:
+            raise SystemExit("ray_data is only valid for top-level evaluation")
+        if args.output is None:
+            raise SystemExit("output is required via --output or config")
+        if eval_mode != _TORCH_COMPILE_EVAL_MODE and args.input is None:
+            raise SystemExit("input is required via --input or config")
+        # The CPU driver never enters local clock management. Each actor runs
+        # the ordinary top-level evaluator against its own assigned GPU.
+        from atrex_bench import AtrexConfigError
+
+        try:
+            with _sigterm_as_system_exit():
+                payload = evaluate_ray_data(distributed_config)
+        except AtrexConfigError as error:
+            raise SystemExit(str(error)) from error
+        kernel_name = _kernel_name(args.reference_dir, args.input or args.reference_dir)
+        _, result_path = _build_artifact_paths(output_root=args.output,
+                                              kernel_name=kernel_name,
+                                              timestamp=get_timestamp())
+        _save_eval_json(payload, result_path)
+        if args.sdk_result_path_output is not None:
+            _save_text_atomic(str(result_path.resolve()), args.sdk_result_path_output)
+        print(f"[OUTPUT] {result_path}")
+        raise SystemExit(0 if _payload_overall_passed(payload) else 1)
     if args.correctness_max_rel_l2 is not None:
         os.environ[CORRECTNESS_MAX_REL_L2_ENV] = str(
             args.correctness_max_rel_l2
