@@ -240,6 +240,20 @@ pipeline in an isolated worker. The top-level `eval_result.json` reports the
 per-shape and aggregate candidate speedup over the baseline. With managed clock
 locking, one lock and monitoring session covers the complete A-B-B-A sequence.
 
+To evaluate an explicit shape subset, add `--shape-ids 0,2` or
+`--shape-ids @ids.json` (a JSON array of original shape IDs). The SDK config field
+is `shape_ids`. Selection keeps the full reference bundle and the same RNG
+seeds, tolerances, and timing settings as a serial run. Candidate, Torch compile,
+and ABBA modes support it. Results mark the selected IDs and partial coverage in
+`shape_selection`.
+
+Run disjoint shards on independent GPUs, then merge their result dictionaries
+or JSON paths with `atrex_bench.merge_evaluation_shards(shards, output="merged.json")`.
+Merging requires complete coverage and matching input/evaluator hashes,
+settings, hardware, toolchain, and seeds. See the
+[shape shard contract and Gateway examples](docs/run_eval_cli_contract.md#explicit-shape-shards-and-offline-merging)
+for `agate eval --shape-shards` and manual subset usage.
+
 ## Repository Layout
 
 ```text

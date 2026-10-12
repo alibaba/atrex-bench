@@ -32,6 +32,7 @@ start an evaluation, the subprocess fails abnormally, or the result artifacts ar
 | `validation_mode` | enum | Optional | `full`, `correctness_only`, or `performance_only`; defaults to `full`. |
 | `input` | path | Required in candidate and ABBA modes | Candidate Python file; must not be set in Torch compile mode. |
 | `baseline_input` | path | Required in ABBA mode | Baseline A Python file. `input` is candidate B. Supplying `--baseline-input` selects ABBA mode. |
+| `shape_ids` | list of strings, comma-separated string, or `@file` | Optional | Explicit subset of original `shapes.json` IDs. Omit to evaluate every shape. |
 | `reference_dir` | path | Always | Reference directory. Must contain `reference.py`, `input.py`, `shapes.json`, and `metadata.json`. |
 | `output` | path | Always | Root directory for evaluation artifacts. |
 | `checkpoint_dir` | path | Optional | Root directory for correctness/performance checkpoints. |
@@ -65,6 +66,78 @@ the geometric mean across shapes. The result reports
 `improvement_pct = (speedup - 1) * 100` both per shape and overall. Any failed
 run, invalid timing, incomplete schedule, or environment mismatch fails the ABBA
 result; partial runs remain available as artifacts but are not aggregated.
+
+### Explicit shape shards and offline merging
+
+`--shape-ids 0,2` evaluates only those shapes. `--shape-ids @ids.json` reads a
+JSON string array; a text file with one ID per line or comma-separated IDs also
+works. The config/SDK form is `"shape_ids": ["0", "2"]`. Explicit CLI selection
+overrides the config. Duplicate, unknown, or empty selections fail before
+workers start. Selection follows the original string-sorted shape order, keeps
+the IDs unchanged, and archives the complete, unchanged `shapes.json`.
+
+Candidate full/correctness-only/performance-only, Torch compile, and ABBA all
+support selection. Every ABBA shard executes its own complete A-B-B-A sequence
+on its selected shapes. Module import/compilation still runs once per shard;
+per-shape compilation, correctness, and timing run only for selected IDs. The
+existing tolerance and timing settings and `sha256(stage|shape_id|case_index)`
+RNG seed policy remain unchanged. Parallel shards need separate workers/GPUs;
+running concurrent shards on one GPU would contaminate timing.
+
+Every result has a `shape_selection` block containing `schema_version="v1"`,
+the complete `all_shape_ids`, `selected_shape_ids`, `partial`, per-shape
+`input_seeds`, the correctness case count, `seed_policy`, SHA-256 hashes of the
+reference/candidate files (and ABBA baseline), `evaluator_version`, and a
+fingerprint of the evaluator's Python source. Environment and runner settings
+remain in the normal `environment` and `runner_config` blocks.
+
+Merge disjoint shards with the public SDK function:
+
+```python
+from atrex_bench import evaluate, merge_evaluation_shards
+
+common = {
+    "input": "/abs/candidate.py",
+    "reference_dir": "/abs/operator",
+    "validation_mode": "full",
+}
+# Run these separately on independent GPU workers; collect the result dictionaries.
+a = evaluate({**common, "output": "/abs/shard-a", "shape_ids": ["0", "2"]})
+b = evaluate({**common, "output": "/abs/shard-b", "shape_ids": ["1", "3"]})
+report = merge_evaluation_shards([a, b], output="/abs/merged_eval_result.json")
+```
+
+`merge_evaluation_shards` also accepts `eval_result.json` paths. It requires
+exactly one result for every original shape and raises `ValueError` for missing
+or duplicate shapes, mismatched source hashes, evaluator versions/fingerprints,
+settings, seeds, GPU models, toolchain versions, or clock targets. GPU UUIDs,
+indices, and individual clock traces may differ across workers. Failed stages
+remain failed in the merged report. ABBA merging combines corresponding legs
+and recomputes the overall geometric means from all shapes; it never averages
+shard speedups. `shard_evaluations` preserves each source eval ID, selection,
+and full environment evidence. The resulting `shape_selection.partial` is false.
+
+With a Gateway deployment that supports shape sharding and pins a compatible
+Atrex-Bench wheel, ordinary eval automatically shards when the deployment
+enables it:
+
+```bash
+agate eval --profile pre --gpu L20N --candidate candidate.py --reference-dir operator
+```
+
+Use `--shape-shards 1` for serial execution or `--shape-shards 2` to cap automatic
+fanout at two shard workers. A manual partial run uses the same selection field:
+
+```bash
+agate eval --profile pre --gpu L20N --candidate candidate.py --reference-dir operator \
+  --set 'shape_ids=["0","2"]' --shape-shards 1
+```
+
+For manual shards, download each native `eval_result.json` artifact and pass the
+paths to `merge_evaluation_shards`. The files must cover the entire original
+shape set. A partial report alone is not a full-operator result. Deployments can
+check `atrex_bench.SHAPE_SHARD_SCHEMA_VERSION == "v1"` and the presence of
+`merge_evaluation_shards` before enabling fanout.
 
 ## 4. Recommended General Options
 
