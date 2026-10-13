@@ -673,6 +673,8 @@ def check_correctness(
                             **candidate_call_inputs.kwargs,
                         )
                         sync_device(resolved_device)
+                        from atrex_bench.eval.distributed import check_output_contract
+                        check_output_contract(candidate_call_inputs, candidate_output, contract)
                 except CandidateTimeoutError as timeout_error:
                     failed_cases += 1
                     case_records.append(

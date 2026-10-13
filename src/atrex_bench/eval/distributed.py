@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import os
 from contextlib import contextmanager
@@ -115,3 +116,36 @@ def measure(bench_fn, *, device, warmup_iters: int, bench_iters: int):
         samples.append(float(start.elapsed_time(end)))
     ranks = gather(samples)
     return max_rank_samples(ranks), ranks
+
+
+def check_output_contract(inputs, output, contract: dict) -> None:
+    """Enforce explicit collective storage/rank guarantees outside timing."""
+    from atrex_bench.eval._runtime import flatten_outputs
+
+    requirements = contract.get("validation_requirements", [])
+    if not active():
+        return
+    outputs = [value for _, value in flatten_outputs(output)]
+    if "same output on all ranks" in requirements:
+        fingerprint = hashlib.sha256()
+        for value in outputs:
+            if not isinstance(value, torch.Tensor):
+                raise ValueError("rank-equality contract requires tensor outputs")
+            fingerprint.update(str((tuple(value.shape), value.dtype)).encode())
+            fingerprint.update(value.detach().contiguous().view(torch.uint8).cpu().numpy().tobytes())
+        if len(set(gather(fingerprint.hexdigest()))) != 1:
+            raise ValueError("collective output differs between ranks")
+    if "output storage independence" in requirements:
+        def tensors(value):
+            if isinstance(value, torch.Tensor):
+                yield value
+            elif isinstance(value, (list, tuple)):
+                for item in value:
+                    yield from tensors(item)
+            elif isinstance(value, dict):
+                for item in value.values():
+                    yield from tensors(item)
+        storage = {item.untyped_storage().data_ptr() for item in tensors((inputs.args, inputs.kwargs))}
+        if any(isinstance(value, torch.Tensor) and value.untyped_storage().data_ptr() in storage
+               for value in outputs):
+            raise ValueError("collective output aliases an input")

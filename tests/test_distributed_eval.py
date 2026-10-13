@@ -6,7 +6,7 @@ import pytest
 import torch
 
 from atrex_bench.eval import distributed
-from atrex_bench.eval._runtime import clone_value
+from atrex_bench.eval._runtime import clone_value, ModelInputs
 
 
 def metadata(tmp_path, count=4, **extra):
@@ -58,6 +58,21 @@ def test_process_group_not_deepcopied():
     with patch.object(torch.distributed, "ProcessGroup", Group):
         cloned = clone_value({"x": torch.ones(2), "group": group})
     assert cloned["group"] is group
+
+
+def test_collective_storage_and_off_rank_mismatch_fail():
+    x = torch.ones(4)
+    inputs = ModelInputs(args=(x,), kwargs={})
+    contract = {"validation_requirements": ["output storage independence", "same output on all ranks"]}
+    with patch.object(distributed, "active", return_value=True), \
+         patch.object(distributed, "gather", side_effect=lambda value: [value] * 4):
+        distributed.check_output_contract(inputs, x.clone(), contract)
+        with pytest.raises(ValueError, match="aliases"):
+            distributed.check_output_contract(inputs, x, contract)
+    with patch.object(distributed, "active", return_value=True), \
+         patch.object(distributed, "gather", return_value=["a", "a", "a", "b"]):
+        with pytest.raises(ValueError, match="differs between ranks"):
+            distributed.check_output_contract(inputs, x.clone(), contract)
 
 
 def test_worker_command_uses_four_ranks(tmp_path):
