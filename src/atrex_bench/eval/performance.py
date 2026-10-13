@@ -138,6 +138,7 @@ class PerformanceShapeResult:
     graph_correctness: dict[str, object] | None = None
     error: str | None = None
     observed_kernels: dict[str, list[str]] | None = None
+    distributed: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -146,6 +147,7 @@ class _MeasurementResult:
     kernel_events: list[KernelTimingEvent] = field(default_factory=list)
     capture_time_ms: float | None = None
     graph_correctness: dict[str, object] | None = None
+    distributed: dict | None = None
 
 
 def _profile_activities(device: torch.device) -> list[ProfilerActivity]:
@@ -628,6 +630,18 @@ def _measure_runner_samples(
             return model(*benchmark_inputs.args, **benchmark_inputs.kwargs)
 
     with torch.inference_mode(), candidate_timeout(perf_timeout_s):
+        from atrex_bench.eval import distributed
+
+        if distributed.active():
+            if benchmark_mode != EAGER_BENCHMARK_MODE:
+                raise ValueError("distributed evaluation currently requires eager timing")
+            samples, ranks = distributed.measure(
+                _bench_fn, device=device, warmup_iters=warmup_iters, bench_iters=bench_iters)
+            return _MeasurementResult(
+                samples=[PerformanceSample(end_to_end_time_ms=x) for x in samples],
+                distributed={"world_size": len(ranks), "backend": "nccl",
+                             "timing": "cuda_event_max_rank", "rank_samples_ms": ranks},
+            )
         if benchmark_mode == CUDA_GRAPH_REPLAY_BENCHMARK_MODE:
             return _measure_cuda_graph_samples(
                 bench_fn=_bench_fn,
@@ -809,6 +823,7 @@ def benchmark_performance(
         kernel_events=measurement.kernel_events,
         benchmark_mode=benchmark_mode,
         capture_time_ms=measurement.capture_time_ms,
+        distributed=measurement.distributed,
         cache_flush_mb=(
             cuda_graph_cache_flush_mb
             if benchmark_mode == CUDA_GRAPH_REPLAY_BENCHMARK_MODE
