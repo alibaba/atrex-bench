@@ -111,6 +111,10 @@ def measure(bench_fn, *, device, warmup_iters: int, bench_iters: int):
         start, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
         start.record()
         bench_fn()
+        # A candidate may launch communication on a non-current stream. Wait
+        # for device completion before recording the end event, or enqueue-only
+        # collectives could appear faster without measuring their GPU work.
+        torch.cuda.synchronize(device)
         end.record()
         end.synchronize()
         samples.append(float(start.elapsed_time(end)))
