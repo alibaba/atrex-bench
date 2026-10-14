@@ -27,7 +27,8 @@ shutdown_called = False
 handles = []
 current = None
 class RayActorError(Exception): pass
-exceptions = types.SimpleNamespace(RayActorError=RayActorError)
+class GetTimeoutError(Exception): pass
+exceptions = types.SimpleNamespace(RayActorError=RayActorError, GetTimeoutError=GetTimeoutError)
 pickle_registry = set()
 cloudpickle = types.SimpleNamespace(
     register_pickle_by_value=lambda m: pickle_registry.add(m.__name__),
@@ -449,6 +450,66 @@ def test_registry_termination_failure_still_disconnects(evaluator, fake_ray, mon
         adapter.evaluate_ray_data(config_for(reference, candidate, tmp_path / "out"))
     assert not ray.cloudpickle.list_registry_pickle_by_value()
     assert ray.shutdown_called
+
+
+def test_async_kill_acknowledges_workers_and_registry_after_successful_ready_calls(
+    evaluator, fake_ray, monkeypatch, tmp_path
+):
+    local, reference, candidate, _ = evaluator
+    ray, _ = fake_ray
+    original_kill, original_remote = ray.kill, ray.Method.remote
+
+    def request_kill(handle, no_restart=True):
+        handle.kill_requested = True
+        handle.ready_after_kill = 0
+
+    def delayed_remote(method, *args, **kwargs):
+        if method.name == "__ray_ready__" and getattr(method.handle, "kill_requested", False):
+            method.handle.ready_after_kill += 1
+            if method.handle.ready_after_kill < 3:
+                return True
+            original_kill(method.handle)
+        return original_remote(method, *args, **kwargs)
+
+    monkeypatch.setattr(ray, "kill", request_kill)
+    monkeypatch.setattr(ray.Method, "remote", delayed_remote)
+    monkeypatch.setattr(adapter.time, "sleep", lambda duration: None)
+    monkeypatch.setattr("atrex_bench.evaluate", lambda config: local(config["shape_ids"]))
+    result = adapter.evaluate_ray_data(config_for(reference, candidate, tmp_path / "out"))
+    assert result["shape_selection"]["selected_shape_ids"] == IDS
+    assert all(handle.dead and handle.ready_after_kill == 3 for handle in ray.handles)
+    assert ray.shutdown_called
+
+
+def test_actor_termination_deadline_does_not_accept_successful_ready(fake_ray, monkeypatch):
+    ray, _ = fake_ray
+    handle = ray.Handle()
+    now = [0.0]
+    monkeypatch.setattr(adapter, "_ACTOR_TERMINATION_TIMEOUT_S", 0.1)
+    monkeypatch.setattr(adapter.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(
+        adapter.time, "sleep", lambda duration: now.__setitem__(0, now[0] + duration)
+    )
+    monkeypatch.setattr(ray, "kill", lambda *args, **kwargs: None)
+    with pytest.raises(RuntimeError, match="worker registry did not terminate"):
+        adapter._terminate_registry(ray, handle)
+    assert now[0] == pytest.approx(0.1)
+    assert not handle.dead
+
+
+def test_actor_ready_timeout_is_not_death_confirmation(fake_ray, monkeypatch):
+    ray, _ = fake_ray
+    handle = ray.Handle()
+    monkeypatch.setattr(ray, "kill", lambda *args, **kwargs: None)
+
+    def timed_out(*args, **kwargs):
+        raise ray.exceptions.GetTimeoutError("ready task timed out")
+
+    monkeypatch.setattr(ray, "get", timed_out)
+    with pytest.raises(RuntimeError, match="worker registry did not terminate") as failure:
+        adapter._terminate_registry(ray, handle)
+    assert isinstance(failure.value.__cause__, ray.exceptions.GetTimeoutError)
+    assert not handle.dead
 
 
 def test_abba_runs_full_schedule_in_each_shard(evaluator, fake_ray, monkeypatch, tmp_path):

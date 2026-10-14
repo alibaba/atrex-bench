@@ -15,6 +15,8 @@ from pathlib import Path
 
 RAY_DATA_DISTRIBUTION_SCHEMA_VERSION = "v1"
 _DIRECTORY_CLEANUP_DELAY_S = 6
+_ACTOR_TERMINATION_TIMEOUT_S = 10
+_ACTOR_TERMINATION_POLL_S = 0.05
 
 _DISTRIBUTION_KEYS = {
     "distribution",
@@ -276,28 +278,37 @@ class _ShardEvaluator:
             os.environ.pop(LIFETIME_FD_ENV, None)
 
 
+def _wait_actor_terminated(ray, handle, description):
+    # kill is asynchronous. A ready call that wins the race is still allowed
+    # to return True; only RayActorError confirms that this handle is dead.
+    deadline = time.monotonic() + _ACTOR_TERMINATION_TIMEOUT_S
+    message = f"Ray {description} did not terminate"
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError(message)
+        try:
+            ray.get(handle.__ray_ready__.remote(), timeout=remaining)
+        except ray.exceptions.RayActorError:
+            return
+        except ray.exceptions.GetTimeoutError as error:
+            raise RuntimeError(message) from error
+        time.sleep(min(_ACTOR_TERMINATION_POLL_S, max(0, deadline - time.monotonic())))
+
+
 def _drain_actors(ray, registry):
     handles = ray.get(registry.workers.remote())
     actor_ids = [handle._actor_id.hex() for handle in handles]
     for handle in handles:
         ray.kill(handle, no_restart=True)
     for handle in handles:
-        try:
-            ray.get(handle.__ray_ready__.remote(), timeout=10)
-        except ray.exceptions.RayActorError:
-            pass
-        else:
-            raise RuntimeError("Ray Data worker did not terminate")
+        _wait_actor_terminated(ray, handle, "Data worker")
     return actor_ids
 
 
 def _terminate_registry(ray, registry):
     ray.kill(registry, no_restart=True)
-    try:
-        ray.get(registry.__ray_ready__.remote(), timeout=10)
-    except ray.exceptions.RayActorError:
-        return
-    raise RuntimeError("Ray worker registry did not terminate")
+    _wait_actor_terminated(ray, registry, "worker registry")
 
 
 def evaluate_ray_data(config):
