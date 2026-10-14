@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 from pathlib import Path
 
@@ -152,6 +153,22 @@ class _ActorRegistry:
         return self.handles
 
 
+def _runtime_diagnostics(ray, *, actor=False):
+    """Record Ray placement and process values without entering a GPU runtime."""
+    context = ray.get_runtime_context()
+    result = {
+        "job_id": str(context.get_job_id()),
+        "node_id": str(context.get_node_id()),
+        "pid": os.getpid(),
+        "assigned_gpu_ids": [str(value) for value in ray.get_gpu_ids()],
+        "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
+        "python_executable": sys.executable,
+    }
+    if actor:
+        result["actor_id"] = str(context.get_actor_id())
+    return result
+
+
 def _start_directory_janitor(root, read_fd):
     # Ray force-kills actors, so their Python finalizers cannot remove private
     # sources/checkpoints. The janitor receives only the read end of the actor
@@ -210,6 +227,8 @@ class _ShardEvaluator:
                 setattr(self, name, None)
 
     def __call__(self, batch):
+        import ray
+
         from atrex_bench import evaluate, sdk
         from atrex_bench._process_guard import LIFETIME_FD_ENV, supervised_popen
 
@@ -227,15 +246,31 @@ class _ShardEvaluator:
 
         sdk._start_process = start
         try:
-            results = []
+            results, executions = [], []
             for shard_id, selected in zip(batch["shard_id"], batch["shape_ids_json"]):
                 config = {
                     **self.config,
                     "shape_ids": json.loads(selected),
                     "output": str(self.root / "output" / str(shard_id)),
                 }
+                execution = {
+                    **_runtime_diagnostics(ray, actor=True),
+                    "shard_id": str(shard_id),
+                    "shape_ids": config["shape_ids"],
+                    "start_utc_ns": time.time_ns(),
+                }
+                started = time.perf_counter_ns()
                 results.append(json.dumps(evaluate(config), allow_nan=False))
-            return {"shard_id": batch["shard_id"], "result_json": results}
+                execution.update(
+                    end_utc_ns=time.time_ns(),
+                    duration_s=(time.perf_counter_ns() - started) / 1_000_000_000,
+                )
+                executions.append(json.dumps(execution, allow_nan=False))
+            return {
+                "shard_id": batch["shard_id"],
+                "result_json": results,
+                "execution_json": executions,
+            }
         finally:
             sdk._start_process = original_start
             os.environ.pop(LIFETIME_FD_ENV, None)
@@ -309,6 +344,7 @@ def evaluate_ray_data(config):
     if not already_registered:
         ray.cloudpickle.register_pickle_by_value(sys.modules[__name__])
     try:
+        driver = _runtime_diagnostics(ray)
         registry = ray.remote(num_cpus=0)(_ActorRegistry).options(**placement).remote()
         bundle = _snapshot_sources(config)
         rows = [
@@ -320,7 +356,7 @@ def evaluate_ray_data(config):
             batch_size=1,
             num_gpus=1,
             compute=ray.data.ActorPoolStrategy(
-                min_size=1, max_size=maximum, max_tasks_in_flight_per_actor=1
+                min_size=maximum, max_size=maximum, max_tasks_in_flight_per_actor=1
             ),
             fn_constructor_args=(bundle, config, registry),
             max_restarts=0,
@@ -332,8 +368,9 @@ def evaluate_ray_data(config):
             raise AtrexEvaluationError("Missing or unknown Ray shard results")
         if len(results) != len(rows):
             raise AtrexEvaluationError("Duplicate Ray shard results")
+        results.sort(key=lambda row: row["shard_id"])
         merged = merge_evaluation_shards([json.loads(row["result_json"]) for row in results])
-        job_id = ray.get_runtime_context().get_job_id()
+        executions = [json.loads(row["execution_json"]) for row in results]
     finally:
         try:
             if registry is not None:
@@ -356,7 +393,9 @@ def evaluate_ray_data(config):
         "worker_num_gpus": 1,
         "worker_exit_grace_s": WORKER_EXIT_GRACE_S,
         "namespace": namespace,
-        "driver_job_id": job_id,
+        "driver_job_id": driver["job_id"],
+        "driver": driver,
+        "shards": executions,
         "worker_actor_ids": actor_ids,
         "ray_version": ray.__version__,
         "source_snapshot_sha256": hashlib.sha256(

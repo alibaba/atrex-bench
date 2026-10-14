@@ -172,7 +172,7 @@ report = evaluate({
 | Config field | Default | Meaning |
 |---|---|---|
 | `distribution` | `local` | `local` or `ray_data`. |
-| `ray_max_workers` | `4` | Maximum concurrent one-GPU actors, integer `1..31`. Actual maximum is capped by the shard count. |
+| `ray_max_workers` | `4` | Initial bounded pool of one-GPU actors, integer `1..31`, capped by the shard count. |
 | `ray_shapes_per_shard` | `1` | Positive number of consecutive original shape IDs per dataset row. |
 | `ray_resources` | `{}` | Ray custom resource requirements for workers and the CPU registry; positive numbers, excluding `CPU` and `GPU`. |
 | `ray_node_selector` | `{}` | Ray `label_selector` mapping for those actors. |
@@ -180,8 +180,8 @@ report = evaluate({
 
 The driver connects with `ray.init(address="auto")` and needs no GPU. Dataset
 rows carry stable shard IDs and the original string-sorted shape IDs. The
-actor pool reserves one GPU per worker, bounds its size by `ray_max_workers`,
-and allows one task in flight per actor. Each row calls `evaluate` with
+actor pool starts at `min(ray_max_workers, shard_count)`, reserves one GPU per
+worker, and allows one task in flight per actor. Each row calls `evaluate` with
 `distribution="local"` in fresh subprocesses. A worker can process multiple
 shards sequentially; model state and evaluator subprocesses are not reused.
 Candidate full/correctness-only/performance-only, Torch compile, and ABBA use
@@ -217,6 +217,19 @@ has full `shape_selection` coverage and a `distribution` block with `mode`,
 logical `max_workers`, `shard_count`, source snapshot hash, namespace, driver
 job ID, and worker actor IDs. The capability marker is
 `atrex_bench.ray_data.RAY_DATA_DISTRIBUTION_SCHEMA_VERSION == "v1"`.
+
+The same block retains `driver` process evidence: `job_id`, `node_id`, `pid`,
+`assigned_gpu_ids`, `cuda_visible_devices`, and `python_executable`. Each entry
+in `shards`, ordered by the stable shard ID, adds `actor_id`, `shard_id`,
+`shape_ids`, `start_utc_ns`, `end_utc_ns`, and monotonic `duration_s`. These values
+come from Ray and the process without importing Torch or querying a GPU. A
+driver's empty Ray GPU-ID list alone does not establish its reservation or GPU
+visibility; the caller must also provide the zero-GPU allocation and empty mask.
+Shard intervals cover the local evaluation and result serialization, including
+CPU setup. They support checking actual GPU-worker evaluation overlap and wall
+time alongside the per-shape GPU samples; they are not kernel-busy telemetry or
+a speedup guarantee. UTC interval comparison uses the worker clocks, while each
+duration uses its own monotonic clock.
 
 Workers and the registry belong to the driver job and are not detached. On
 success or failure the driver kills and confirms registered actors before

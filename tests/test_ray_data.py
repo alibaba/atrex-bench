@@ -64,9 +64,15 @@ def shutdown():
     global shutdown_called
     shutdown_called = True
 def get_runtime_context():
-    return types.SimpleNamespace(current_actor=current, get_job_id=lambda: "job-1")
+    handle = current
+    return types.SimpleNamespace(
+        current_actor=handle, get_job_id=lambda: "job-1",
+        get_node_id=lambda: "node-" + handle._actor_id.hex() if handle else "node-driver",
+        get_actor_id=lambda: handle._actor_id.hex())
+def get_gpu_ids(): return [0] if current else []
 """
 FAKE_DATA = """
+import os
 import ray
 last_options = None
 last_rows = None
@@ -81,17 +87,25 @@ class Dataset:
         self.cls, self.options = cls, kwargs
         return self
     def take_all(self):
-        count = min(self.options["compute"].options["max_size"], len(self.rows))
+        count = self.options["compute"].options["min_size"]
         actors = []
         for index in range(count):
             ray.current = ray.Handle()
             actor = self.cls(*self.options["fn_constructor_args"])
             ray.current.value = actor
-            actors.append(actor)
+            actors.append((ray.current, actor))
         results = []
-        for index, row in enumerate(self.rows):
-            out = actors[index % count]({key: [value] for key,value in row.items()})
-            results.append({key: value[0] for key,value in out.items()})
+        old_mask = os.environ.get("CUDA_VISIBLE_DEVICES")
+        try:
+            os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+            for index, row in enumerate(self.rows):
+                ray.current, actor = actors[index % count]
+                out = actor({key: [value] for key,value in row.items()})
+                results.append({key: value[0] for key,value in out.items()})
+        finally:
+            ray.current = None
+            if old_mask is None: os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+            else: os.environ["CUDA_VISIBLE_DEVICES"] = old_mask
         if mutation == "missing": results.pop()
         if mutation == "duplicate": results.append(results[0])
         if mutation == "exception": raise RuntimeError("worker lost")
@@ -194,6 +208,8 @@ def test_actor_distribution_preserves_shapes_and_paths(evaluator, fake_ray, monk
     assert ray.data.last_rows[0]["shape_ids_json"] == json.dumps(["10", "2"])
     assert ray.data.last_options["batch_size"] == 1
     assert ray.data.last_options["num_gpus"] == 1
+    assert ray.data.last_options["compute"].options["min_size"] == 2
+    assert ray.data.last_options["compute"].options["max_size"] == 2
     assert ray.data.last_options["compute"].options["max_tasks_in_flight_per_actor"] == 1
     assert ray.data.last_options["resources"] == {"gpu_worker": 0.001}
     assert calls[0]["clock_lock_mode"] == "manage"
@@ -201,6 +217,90 @@ def test_actor_distribution_preserves_shapes_and_paths(evaluator, fake_ray, monk
     assert calls[0]["checkpoint_dir"] == "checkpoints"
     assert str(tmp_path / "output") not in calls[0]["output"]
     assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
+
+
+@pytest.mark.parametrize("maximum,expected", [(1, 1), (2, 2), (31, 3)])
+def test_initial_pool_uses_the_admitted_size_capped_by_shards(
+    evaluator, fake_ray, monkeypatch, tmp_path, maximum, expected
+):
+    local, reference, candidate, _ = evaluator
+    ray, _ = fake_ray
+    monkeypatch.setattr("atrex_bench.evaluate", lambda config: local(config["shape_ids"]))
+    result = adapter.evaluate_ray_data(
+        config_for(
+            reference, candidate, tmp_path / "out",
+            ray_max_workers=maximum, ray_shapes_per_shard=1,
+        )
+    )
+    assert ray.data.last_options["compute"].options["min_size"] == expected
+    assert ray.data.last_options["compute"].options["max_size"] == expected
+    assert len(result["distribution"]["worker_actor_ids"]) == expected
+
+
+def test_runtime_diagnostics_normalize_ray_identity_objects(fake_ray, monkeypatch):
+    ray, _ = fake_ray
+
+    class Identity:
+        def __str__(self):
+            return "identity-as-text"
+
+    class Context:
+        get_job_id = get_node_id = get_actor_id = lambda self: Identity()
+
+    monkeypatch.setattr(ray, "get_runtime_context", Context)
+    diagnostics = adapter._runtime_diagnostics(ray, actor=True)
+    assert [diagnostics[key] for key in ("job_id", "node_id", "actor_id")] == [
+        "identity-as-text"
+    ] * 3
+    json.dumps(diagnostics, allow_nan=False)
+
+
+def test_retained_diagnostics_keep_each_shard_identity_and_monotonic_duration(
+    evaluator, fake_ray, monkeypatch, tmp_path
+):
+    local, reference, candidate, _ = evaluator
+    ray, _ = fake_ray
+    monkeypatch.setattr("atrex_bench.evaluate", lambda config: local(config["shape_ids"]))
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
+    utc = iter([100, 200, 300, 400, 500, 600])
+    monotonic = iter([1_000_000_000, 1_250_000_000,
+                      2_000_000_000, 2_500_000_000,
+                      3_000_000_000, 3_750_000_000])
+    monkeypatch.setattr(adapter.time, "time_ns", lambda: next(utc))
+    monkeypatch.setattr(adapter.time, "perf_counter_ns", lambda: next(monotonic))
+    result = adapter.evaluate_ray_data(
+        config_for(reference, candidate, tmp_path / "out", ray_shapes_per_shard=1)
+    )
+    distribution = result["distribution"]
+    driver = distribution["driver"]
+    assert driver == {
+        "job_id": "job-1", "node_id": "node-driver", "pid": os.getpid(),
+        "assigned_gpu_ids": [], "cuda_visible_devices": "",
+        "python_executable": sys.executable,
+    }
+    assert distribution["driver_job_id"] == driver["job_id"]
+    rows = distribution["shards"]
+    assert [row["shard_id"] for row in rows] == [f"shape-{i:06d}" for i in range(3)]
+    assert [row["shape_ids"] for row in rows] == [[sid] for sid in IDS]
+    assert [row["start_utc_ns"] for row in rows] == [100, 300, 500]
+    assert [row["end_utc_ns"] for row in rows] == [200, 400, 600]
+    assert [row["duration_s"] for row in rows] == [.25, .5, .75]
+    assert len({row["node_id"] for row in rows}) == 2
+    assert {row["actor_id"] for row in rows} == set(distribution["worker_actor_ids"])
+    for row in rows:
+        assert row["job_id"] == driver["job_id"]
+        assert row["assigned_gpu_ids"] == ["0"]
+        assert row["cuda_visible_devices"] == "0"
+        assert row["pid"] == os.getpid()
+        assert row["python_executable"] == sys.executable
+        assert set(row) == set(driver) | {
+            "actor_id", "shard_id", "shape_ids", "start_utc_ns", "end_utc_ns", "duration_s"
+        }
+    # Fake actors run serially in this test. Retained identities/times do not
+    # manufacture a claim of overlapping GPU execution.
+    assert all(left["end_utc_ns"] < right["start_utc_ns"]
+               for left, right in zip(rows, rows[1:]))
+    json.dumps(distribution, allow_nan=False)
 
 
 @pytest.mark.parametrize("failure", ["missing", "duplicate", "exception"])
@@ -280,12 +380,23 @@ class Register:
     def remote(self, *args): return None
 sys.modules["ray"] = types.SimpleNamespace(
     __version__="2.55.0", get=lambda x:x,
-    get_runtime_context=lambda: types.SimpleNamespace(current_actor=None))
+    get_gpu_ids=lambda: [0],
+    get_runtime_context=lambda: types.SimpleNamespace(
+        current_actor=None, get_job_id=lambda: "job-bootstrap",
+        get_node_id=lambda: "node-bootstrap", get_actor_id=lambda: "actor-bootstrap"))
 actor = actor_type(bundle, config, types.SimpleNamespace(register=Register()))
-from atrex_bench import evaluate
-assert callable(evaluate)
+import atrex_bench
+assert callable(atrex_bench.evaluate)
+atrex_bench.evaluate = lambda config: {"shape_ids": config["shape_ids"]}
 assert Path(actor.config["input"]).read_bytes() == bundle["files"][bundle["paths"]["input"]]
 assert Path(actor.config["reference_dir"]).joinpath("shapes.json").is_file()
+row = actor({"shard_id": ["shape-000000"], "shape_ids_json": ['["10"]']})
+import json
+execution = json.loads(row["execution_json"][0])
+assert execution["actor_id"] == "actor-bootstrap"
+assert execution["assigned_gpu_ids"] == ["0"]
+assert execution["python_executable"] == sys.executable
+actor.__del__()
 print("bootstrapped")
 """
     process = subprocess.run(
@@ -380,6 +491,7 @@ def test_abba_runs_full_schedule_in_each_shard(evaluator, fake_ray, monkeypatch,
     ] * 2
     assert [ids for _, ids in schedule] == [["10", "2"]] * 4 + [["31"]] * 4
     assert result["shape_selection"]["partial"] is False
+    assert len(result["distribution"]["shards"]) == 2
     for leg in result["abba"]["runs"]:
         assert leg["result"]["shape_selection"]["selected_shape_ids"] == IDS
 
@@ -415,6 +527,13 @@ def test_sdk_to_cli_distributed_failure_payload_and_pointer(evaluator, fake_ray,
     assert all(row["status"] == "failed" for row in result["passed"]["compile"].values())
     assert result["shape_selection"]["partial"] is False
     assert result["distribution"]["shard_count"] == 2
+    assert result["distribution"]["driver"]["job_id"] == "job-1"
+    assert result["distribution"]["driver"]["assigned_gpu_ids"] == []
+    rows = result["distribution"]["shards"]
+    assert [row["shape_ids"] for row in rows] == [["10", "2"], ["31"]]
+    assert {row["actor_id"] for row in rows} == set(result["distribution"]["worker_actor_ids"])
+    assert all(row["assigned_gpu_ids"] == ["0"] and row["duration_s"] >= 0
+               and row["end_utc_ns"] >= row["start_utc_ns"] for row in rows)
     outputs = list((tmp_path / "real").rglob("eval_result.json"))
     assert len(outputs) == 1
     assert json.loads(outputs[0].read_text()) == result
