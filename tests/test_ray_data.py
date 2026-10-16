@@ -567,7 +567,7 @@ def test_incompatible_worker_environment_fails_merge(evaluator, fake_ray, monkey
         return result
 
     monkeypatch.setattr("atrex_bench.evaluate", run)
-    with pytest.raises(ValueError, match="Incompatible"):
+    with pytest.raises(ValueError, match=r"Incompatible.*environment\.torch_version"):
         adapter.evaluate_ray_data(config_for(reference, candidate, tmp_path / "out"))
     assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
 

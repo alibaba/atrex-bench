@@ -234,12 +234,29 @@ def merge_evaluation_shards(
         seen = set()
         for result in results:
             selection = result["shape_selection"]
+            actual = _compatibility(result)
             if (
                 selection["schema_version"] != SHAPE_SHARD_SCHEMA_VERSION
-                or _compatibility(result) != identity
+                or actual != identity
             ):
+                differences = []
+                for section, expected in identity.items():
+                    observed = actual[section]
+                    if observed == expected:
+                        continue
+                    if isinstance(expected, Mapping) and isinstance(observed, Mapping):
+                        differences.extend(
+                            f"{section}.{key}"
+                            for key in sorted(set(expected) | set(observed))
+                            if expected.get(key) != observed.get(key)
+                        )
+                    else:
+                        differences.append(section)
                 raise ValueError(
                     "Incompatible evaluation shards: inputs, config, environment or version"
+                    + " ("
+                    + ", ".join(differences or ["shape_selection.schema_version"])
+                    + ")"
                 )
             selected = selection["selected_shape_ids"]
             if not selected or len(set(selected)) != len(selected) or seen.intersection(selected):
