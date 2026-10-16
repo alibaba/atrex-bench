@@ -125,7 +125,11 @@ def _compatibility(result: Mapping[str, object]) -> dict[str, object]:
             if key not in {"selected_shape_ids", "input_seeds", "partial"}
         },
         "runner_config": config,
-        "environment": _environment_identity(result["environment"]),
+        "environment": {
+            key: value
+            for key, value in _environment_identity(result["environment"]).items()
+            if key != "driver_version"
+        },
         "kernel": result["kernel"],
         "dsl": result["dsl"],
         "eval_mode": result["eval_mode"],
@@ -287,6 +291,11 @@ def merge_evaluation_shards(
             for result in results
         ]
         merged["environment"] = _environment_identity(first["environment"])
+        # Driver installation is node-local. Keep its exact value per shard,
+        # and never label a mixed-node report with the first node's version.
+        driver_versions = {result["environment"].get("driver_version") for result in results}
+        if len(driver_versions) > 1:
+            merged["environment"]["driver_version"] = None
         from atrex_bench.cli.run_eval import _aggregate_abba_runs, _eval_id
 
         merged["eval_id"] = _eval_id()

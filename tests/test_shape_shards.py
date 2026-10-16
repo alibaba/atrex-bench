@@ -219,6 +219,24 @@ def test_different_devices_allowed_with_same_clock_targets(evaluator):
         merge_evaluation_shards([first, second])
 
 
+@pytest.mark.parametrize(
+    "versions",
+    [("580.126.09", "580.95.05"), ("580.126.09", "580.126.09"), (None, "580.126.09")],
+)
+def test_node_local_driver_versions_are_preserved(evaluator, versions):
+    evaluate, _, _, _ = evaluator
+    first, second = evaluate(["10", "31"]), evaluate(["2"])
+    for result, version in zip((first, second), versions):
+        result["environment"]["driver_version"] = version
+    merged = merge_evaluation_shards([first, second])
+    assert [
+        shard["environment"]["driver_version"] for shard in merged["shard_evaluations"]
+    ] == list(versions)
+    expected_version = versions[0] if versions[0] == versions[1] else None
+    assert merged["environment"]["driver_version"] == expected_version
+    assert all(row["status"] == "passed" for row in merged["passed"]["correctness"].values())
+
+
 def test_failed_shape_is_retained(evaluator):
     evaluate, _, _, _ = evaluator
     first, second = evaluate(["10", "31"]), evaluate(["2"])
@@ -253,6 +271,10 @@ def test_abba_each_leg_filters_and_merge_recomputes_global_means(evaluator, monk
     first = runner.run_abba_eval(**common, timestamp="shard0", shape_ids=["10", "31"])
     second = runner.run_abba_eval(**common, timestamp="shard1", shape_ids=["2"])
     assert calls == [None] * 4 + [["10", "31"]] * 4 + [["2"]] * 4
+    for shard, driver_version in ((first, "580.126.09"), (second, "580.95.05")):
+        shard["environment"]["driver_version"] = driver_version
+        for leg in shard["abba"]["runs"]:
+            leg["result"]["environment"]["driver_version"] = driver_version
     merged = merge_evaluation_shards([first, second])
     assert merged["abba"]["comparison"] == full["abba"]["comparison"]
     assert merged["abba"]["baseline"] == full["abba"]["baseline"]

@@ -116,6 +116,12 @@ remain failed in the merged report. ABBA merging combines corresponding legs
 and recomputes the overall geometric means from all shapes; it never averages
 shard speedups. `shard_evaluations` preserves each source eval ID, selection,
 and full environment evidence. The resulting `shape_selection.partial` is false.
+Driver versions may differ across Ray nodes: each shard retains its exact
+`environment.driver_version`; the merged value is `null` when they differ. GPU
+model/architecture, evaluator, software runtime, inputs, timing configuration,
+and clock targets must still match. Cross-node elapsed-time comparisons should
+account for the recorded driver differences. Incompatibility errors identify
+the differing report fields.
 
 With a Gateway deployment that supports shape sharding and pins a compatible
 Atrex-Bench wheel, ordinary eval automatically shards when the deployment

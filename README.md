@@ -269,7 +269,9 @@ size, capped by the shard count. Each actor reserves one GPU and runs the ordina
 evaluator in fresh subprocesses. The report retains driver placement and per-shard
 actor/node IDs, interpreter, GPU assignment, and execution times so callers can
 verify worker overlap instead of inferring it from the configured maximum. These
-times cover shard evaluations, not individual CUDA kernels. Install
+times cover shard evaluations, not individual CUDA kernels. Node-local driver
+versions are retained per shard; a merged report uses `null` when versions differ.
+GPU model/architecture and software runtime must still match. Install
 `atrex-bench[ray]` with matching native dependencies in the driver and worker
 images. See the [Ray Data runtime and cleanup contract](docs/run_eval_cli_contract.md#automatic-ray-data-distribution)
 for file transport, clock locking, ABBA, and lifecycle requirements.
