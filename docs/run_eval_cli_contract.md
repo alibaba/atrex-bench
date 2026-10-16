@@ -117,7 +117,9 @@ and recomputes the overall geometric means from all shapes; it never averages
 shard speedups. `shard_evaluations` preserves each source eval ID, selection,
 and full environment evidence. The resulting `shape_selection.partial` is false.
 Driver versions may differ across Ray nodes: each shard retains its exact
-`environment.driver_version`; the merged value is `null` when they differ. GPU
+`environment.driver_version`; the merged value is always `null` because it has
+no single host driver, including when all selected nodes share a version. This
+keeps aggregate identity stable across independently scheduled ABBA repeats. GPU
 model/architecture, evaluator, software runtime, inputs, timing configuration,
 and clock targets must still match. Cross-node elapsed-time comparisons should
 account for the recorded driver differences. Incompatibility errors identify

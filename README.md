@@ -270,7 +270,8 @@ evaluator in fresh subprocesses. The report retains driver placement and per-sha
 actor/node IDs, interpreter, GPU assignment, and execution times so callers can
 verify worker overlap instead of inferring it from the configured maximum. These
 times cover shard evaluations, not individual CUDA kernels. Node-local driver
-versions are retained per shard; a merged report uses `null` when versions differ.
+versions are retained per shard; the merged report uses `driver_version: null`
+because its work spans independently managed nodes.
 GPU model/architecture and software runtime must still match. Install
 `atrex-bench[ray]` with matching native dependencies in the driver and worker
 images. See the [Ray Data runtime and cleanup contract](docs/run_eval_cli_contract.md#automatic-ray-data-distribution)

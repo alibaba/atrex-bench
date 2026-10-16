@@ -232,8 +232,7 @@ def test_node_local_driver_versions_are_preserved(evaluator, versions):
     assert [
         shard["environment"]["driver_version"] for shard in merged["shard_evaluations"]
     ] == list(versions)
-    expected_version = versions[0] if versions[0] == versions[1] else None
-    assert merged["environment"]["driver_version"] == expected_version
+    assert merged["environment"]["driver_version"] is None
     assert all(row["status"] == "passed" for row in merged["passed"]["correctness"].values())
 
 
