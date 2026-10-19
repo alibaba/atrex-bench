@@ -407,11 +407,13 @@ def evaluate_ray_data(config):
     retry_context = {
         key: getattr(data_context, key)
         for key in ("actor_task_retry_on_errors", "retried_map_errors", "max_errored_blocks")
+        if hasattr(data_context, key)  # retried_map_errors was added in Ray 2.56.
     }
     # Only Ray system failures may replay a map task; never retry user exceptions
     # or silently drop a failed shard under an inherited DataContext setting.
     data_context.actor_task_retry_on_errors = False
-    data_context.retried_map_errors = False
+    if "retried_map_errors" in retry_context:
+        data_context.retried_map_errors = False
     data_context.max_errored_blocks = 0
     # The evaluator wheel may exist only in the driver's deps. Serialize the
     # small adapter by value; its actors materialize the immutable Python

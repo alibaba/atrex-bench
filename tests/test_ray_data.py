@@ -901,3 +901,19 @@ def test_old_worker_cannot_overwrite_a_newer_shard_attempt():
     with pytest.raises(RuntimeError, match='Stale Ray shard completion'):
         registry.commit('shape', 'old', '{"attempt":1}')
     assert registry.begin('shape', {})['cached']['result_json'] == 'new'
+
+
+@pytest.mark.parametrize('version', ['2.54.0', '2.55.0'])
+def test_pre_256_context_does_not_require_map_exception_retry_option(
+    fake_ray, monkeypatch, tmp_path, version
+):
+    ray, _ = fake_ray
+    ray.__version__ = version
+    config = _retry_fixture(tmp_path, monkeypatch)
+    context = ray.data.DataContext.get_current()
+    monkeypatch.delattr(context, 'retried_map_errors')
+    monkeypatch.setattr('atrex_bench.evaluate', lambda config: {'ids': config['shape_ids']})
+    result = adapter.evaluate_ray_data(config)
+    assert len(result['rows']) == 20
+    assert not hasattr(context, 'retried_map_errors')
+    assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
