@@ -91,8 +91,10 @@ metadata-mode rule is intentionally directional: a floating reference retains
 the existing tolerant comparison behavior for an integer candidate.
 
 Receipts include each tensor's effective tolerance, total element count,
-mismatched count and allowed count, as well as the existing error metrics. When
-metadata owns tolerances, legacy CLI/environment relative-L2 settings cannot
+mismatched count and allowed count, as well as the existing error metrics. The
+receipt `mode` distinguishes exact comparison, elementwise comparison,
+elementwise comparison with an L2 conjunct, and the legacy relative-L2 mode.
+When metadata owns tolerances, legacy CLI/environment relative-L2 settings cannot
 replace them. The legacy global L2-only mode is otherwise unchanged.
 `correctness_min_cases` remains a floor on the CLI-requested case count.
 

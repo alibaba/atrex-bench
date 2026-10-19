@@ -402,6 +402,8 @@ def _compare_output_tensors(
                 else "legacy_relative_l2"
                 if max_rel_l2 is not None
                 else "elementwise_and_l2"
+                if max_rel_l2_bound is not None
+                else "elementwise"
             ),
         },
     )

@@ -225,6 +225,7 @@ def test_fraction_uses_exact_integer_count(tmp_path, size, passed, allowed):
     assert diff.mismatched_elements == 1
     assert diff.allowed_mismatched_elements == allowed
     assert diff.tolerance["relative_to"] == "candidate"
+    assert diff.tolerance["mode"] == "elementwise"
 
 
 def test_exact_path_overrides_default_policy(tmp_path):
@@ -266,6 +267,7 @@ def test_fraction_and_l2_are_both_required(tmp_path):
     assert result.status == "failed"
     assert diff.mismatched_elements == diff.allowed_mismatched_elements == 1
     assert diff.relative_l2 > 0.01
+    assert diff.tolerance["mode"] == "elementwise_and_l2"
 
 
 def test_l2_cannot_replace_fraction_check(tmp_path):
