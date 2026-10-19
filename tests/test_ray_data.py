@@ -888,3 +888,16 @@ def test_registry_bounds_retries_even_if_a_map_bundle_is_replayed():
     for _ in range(5):
         assert registry.begin('done', {})['cached']['result_json'] == '{"passed":true}'
     assert len(registry.progress()['attempts']['done']) == 1
+
+
+def test_old_worker_cannot_overwrite_a_newer_shard_attempt():
+    registry = adapter._ActorRegistry(max_retries=1)
+    registry.begin('shape', {})
+    registry.begin('shape', {})
+    with pytest.raises(RuntimeError, match='Stale Ray shard completion'):
+        registry.commit('shape', 'old', '{"attempt":1}')
+    assert registry.progress()['completed_shard_ids'] == []
+    registry.commit('shape', 'new', '{"attempt":2}')
+    with pytest.raises(RuntimeError, match='Stale Ray shard completion'):
+        registry.commit('shape', 'old', '{"attempt":1}')
+    assert registry.begin('shape', {})['cached']['result_json'] == 'new'

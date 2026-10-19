@@ -177,8 +177,14 @@ class _ActorRegistry:
         return {"attempt": attempt}
 
     def commit(self, shard_id, result, execution):
+        completed = json.loads(execution)
+        if completed["attempt"] != self.attempts[shard_id][-1]["attempt"]:
+            # A partitioned old worker must not overwrite a newer incarnation.
+            raise RuntimeError(f"Stale Ray shard completion: {shard_id}")
+        if shard_id in self.results:
+            return
         self.results[shard_id] = {"result_json": result, "execution_json": execution}
-        self.attempts[shard_id][-1].update(json.loads(execution), status="completed")
+        self.attempts[shard_id][-1].update(completed, status="completed")
 
     def progress(self):
         return {"completed_shard_ids": sorted(self.results), "attempts": self.attempts}
