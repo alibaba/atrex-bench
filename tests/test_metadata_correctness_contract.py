@@ -137,6 +137,33 @@ def test_missing_metadata_fields_keep_legacy_case_count(tmp_path):
     assert not metadata_owns_correctness(reference)
 
 
+@pytest.mark.parametrize("parameter", ["atol", "rtol"])
+@pytest.mark.parametrize(
+    "invalid_value", [float("nan"), float("inf"), float("-inf"), -0.1]
+)
+def test_invalid_global_tolerance_is_rejected(tmp_path, parameter, invalid_value):
+    reference, candidate = _write_problem(
+        tmp_path,
+        reference_body="return x",
+        candidate_body="return torch.full_like(x, 1e9)",
+        contract={},
+        inputs="[torch.zeros(4), torch.zeros(4), torch.zeros(4)]",
+    )
+
+    result = check_correctness(
+        reference,
+        candidate,
+        device="cpu",
+        **{parameter: invalid_value},
+    )
+
+    assert result.status == "failed"
+    assert result.reason == (
+        f"correctness {parameter} must be finite and non-negative; "
+        f"got {invalid_value!r}"
+    )
+
+
 def _fraction_case(tmp_path, candidate_body, *, fraction=0.005, l2=None, size=200):
     reference, candidate = _write_problem(
         tmp_path,
@@ -287,6 +314,101 @@ def test_discrete_output_remains_exact(tmp_path):
 
     assert result.status == "failed"
     assert result.cases[0].outputs[0].allowed_mismatched_elements == 0
+
+
+@pytest.mark.parametrize("reference_dtype", ["torch.int64", "torch.bool"])
+@pytest.mark.parametrize("candidate_dtype", ["torch.float32", "torch.complex64"])
+def test_metadata_policy_rejects_continuous_candidate_for_discrete_reference(
+    tmp_path, reference_dtype, candidate_dtype
+):
+    reference, candidate = _write_problem(
+        tmp_path,
+        reference_body=f"return torch.ones_like(x, dtype={reference_dtype})",
+        candidate_body=(
+            f"y=torch.ones_like(x, dtype={candidate_dtype}); y[0]=2.0; return y"
+        ),
+        contract={
+            "correctness_tolerances": {
+                "default": {
+                    "atol": 0.01,
+                    "rtol": 0.05,
+                    "max_mismatch_fraction": 0.005,
+                }
+            }
+        },
+        inputs="[torch.zeros(200), torch.zeros(200), torch.zeros(200)]",
+    )
+
+    result = check_correctness(reference, candidate, device="cpu")
+
+    assert result.status == "failed"
+    assert "integer and boolean reference outputs" in result.cases[0].outputs[0].error
+
+
+def test_metadata_policy_keeps_boolean_mismatches_exact(tmp_path):
+    reference, candidate = _write_problem(
+        tmp_path,
+        reference_body="return torch.ones_like(x, dtype=torch.bool)",
+        candidate_body=(
+            "y=torch.ones_like(x, dtype=torch.bool); y[0]=False; return y"
+        ),
+        contract={
+            "correctness_tolerances": {
+                "default": {
+                    "atol": 1.0,
+                    "rtol": 1.0,
+                    "max_mismatch_fraction": 1.0,
+                }
+            }
+        },
+        inputs="[torch.zeros(200), torch.zeros(200), torch.zeros(200)]",
+    )
+
+    result = check_correctness(reference, candidate, device="cpu")
+
+    assert result.status == "failed"
+    assert result.cases[0].outputs[0].allowed_mismatched_elements == 0
+
+
+def test_metadata_policy_keeps_float_reference_integer_candidate_compatible(tmp_path):
+    reference, candidate = _write_problem(
+        tmp_path,
+        reference_body="return torch.ones_like(x)",
+        candidate_body=(
+            "y=torch.ones_like(x, dtype=torch.int64); y[0]=2; return y"
+        ),
+        contract={
+            "correctness_tolerances": {
+                "default": {
+                    "atol": 0.01,
+                    "rtol": 0.05,
+                    "max_mismatch_fraction": 0.005,
+                }
+            }
+        },
+        inputs="[torch.zeros(200), torch.zeros(200), torch.zeros(200)]",
+    )
+
+    result = check_correctness(reference, candidate, device="cpu")
+
+    assert result.status == "passed", result.reason
+    assert result.cases[0].outputs[0].mismatched_elements == 1
+
+
+def test_legacy_policy_keeps_integer_reference_float_candidate_compatible(tmp_path):
+    reference, candidate = _write_problem(
+        tmp_path,
+        reference_body="return torch.ones_like(x, dtype=torch.int64)",
+        candidate_body=(
+            "y=torch.ones_like(x, dtype=torch.float32); y[0]=1.01; return y"
+        ),
+        contract={},
+        inputs="[torch.zeros(4), torch.zeros(4), torch.zeros(4)]",
+    )
+
+    result = check_correctness(reference, candidate, device="cpu")
+
+    assert result.status == "passed", result.reason
 
 
 @pytest.mark.parametrize("fraction", [-0.1, 1.01, float("nan"), float("inf")])

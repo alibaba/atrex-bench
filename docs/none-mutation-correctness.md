@@ -81,8 +81,12 @@ small tensors up to one permitted mismatch. Every tensor must pass; elements
 are not pooled across outputs or cases. With `max_rel_l2`, also require
 `norm(candidate-reference)/max(norm(reference), 1e-12) <= max_rel_l2`. A zero
 reference norm requires exact zero error for this additional bound. NaN/Inf are
-rejected before either metric; discrete tensors remain exact regardless of the
-floating policy.
+rejected before either metric. When metadata owns correctness, integer and
+boolean reference tensors remain on the exact-comparison path regardless of the
+floating policy. A floating-point or complex candidate for such a reference is
+rejected; compatible discrete candidate tensors are compared exactly. This
+metadata-mode rule is intentionally directional: a floating reference retains
+the existing tolerant comparison behavior for an integer candidate.
 
 Receipts include each tensor's effective tolerance, total element count,
 mismatched count and allowed count, as well as the existing error metrics. When

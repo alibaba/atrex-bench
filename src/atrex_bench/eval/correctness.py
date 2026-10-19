@@ -225,6 +225,22 @@ def configured_max_rel_l2(explicit: float | None = None) -> float | None:
     return value
 
 
+def _validated_global_tolerance(name: str, raw_value: object) -> float:
+    """Return one process-wide allclose tolerance after fail-closed validation."""
+
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            f"correctness {name} must be finite and non-negative; got {raw_value!r}"
+        ) from error
+    if not math.isfinite(value) or value < 0:
+        raise ValueError(
+            f"correctness {name} must be finite and non-negative; got {raw_value!r}"
+        )
+    return value
+
+
 def _comparison_chunks(reference, candidate):
     """Yield bounded matching views, including noncontiguous logical tensors."""
     if reference.numel() <= _COMPARISON_CHUNK_ELEMENTS:
@@ -249,6 +265,7 @@ def _compare_output_tensors(
     rtol: float,
     max_rel_l2: float | None = None,
     strict_dtype: bool = False,
+    metadata_correctness: bool = False,
     max_mismatch_fraction: float = 0.0,
     max_rel_l2_bound: float | None = None,
 ) -> OutputDiff:
@@ -267,6 +284,23 @@ def _compare_output_tensors(
                 "Output shape mismatch: "
                 f"reference={list(reference_tensor.shape)}, "
                 f"candidate={list(candidate_tensor.shape)}"
+            ),
+        )
+
+    reference_is_discrete = not (
+        torch.is_floating_point(reference_tensor) or torch.is_complex(reference_tensor)
+    )
+    candidate_is_continuous = torch.is_floating_point(candidate_tensor) or torch.is_complex(
+        candidate_tensor
+    )
+    if metadata_correctness and reference_is_discrete and candidate_is_continuous:
+        return OutputDiff(
+            name=name,
+            passed=False,
+            error=(
+                "Metadata correctness policies keep integer and boolean reference outputs "
+                "on the exact-comparison path; "
+                f"candidate dtype {candidate_tensor.dtype} is floating or complex"
             ),
         )
 
@@ -447,6 +481,7 @@ def _compare_value_trees(
             rtol=tolerance.rtol if tolerance is not None else rtol,
             max_rel_l2=max_rel_l2,
             strict_dtype=strict_types,
+            metadata_correctness=bool(policies),
             max_mismatch_fraction=(
                 tolerance.max_mismatch_fraction if tolerance is not None else 0.0
             ),
@@ -634,6 +669,8 @@ def check_correctness(
             reason="num_correctness_cases must be at least 1",
         )
     try:
+        atol = _validated_global_tolerance("atol", atol)
+        rtol = _validated_global_tolerance("rtol", rtol)
         # The CLI resolves this floor before sizing worker budgets and writing
         # runner_config. Keep the same guard here for direct library callers.
         effective_num_correctness_cases = max(
