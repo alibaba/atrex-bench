@@ -180,7 +180,7 @@ report = evaluate({
 | Config field | Default | Meaning |
 |---|---|---|
 | `distribution` | `local` | `local` or `ray_data`. |
-| `ray_max_workers` | `4` | Initial bounded pool of one-GPU actors, integer `1..31`, capped by the shard count. |
+| `ray_max_workers` | shard count | Initial pool of one-GPU actors; an explicit positive integer caps it at the shard count. |
 | `ray_shapes_per_shard` | `1` | Positive number of consecutive original shape IDs per dataset row. |
 | `ray_resources` | `{}` | Ray custom resource requirements for workers and the CPU registry; positive numbers, excluding `CPU` and `GPU`. |
 | `ray_node_selector` | `{}` | Ray `label_selector` mapping for those actors. |

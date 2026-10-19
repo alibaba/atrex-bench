@@ -4677,7 +4677,7 @@ def main() -> None:
     parser.add_argument("--distribution", choices=("local", "ray_data"), default=None,
                         help="Local evaluation or optional Ray Data shape distribution")
     parser.add_argument("--ray-max-workers", type=int, default=None,
-                        help="Maximum Ray GPU workers (1-31, default 4)")
+                        help="Maximum Ray GPU workers (positive integer; defaults to shard count)")
     parser.add_argument("--ray-shapes-per-shard", type=int, default=None,
                         help="Original shapes per Ray work item (default 1)")
     parser.add_argument("--ray-namespace", default=None,

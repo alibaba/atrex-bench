@@ -156,7 +156,7 @@ def config_for(reference, candidate, output, **overrides):
     [
         {"distribution": "other"},
         {"ray_max_workers": True},
-        {"ray_max_workers": 32},
+        {"ray_max_workers": 0},
         {"ray_shapes_per_shard": 0},
         {"ray_resources": {"GPU": 1}},
         {"ray_resources": {"worker": float("nan")}},
@@ -220,7 +220,7 @@ def test_actor_distribution_preserves_shapes_and_paths(evaluator, fake_ray, monk
     assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
 
 
-@pytest.mark.parametrize("maximum,expected", [(1, 1), (2, 2), (31, 3)])
+@pytest.mark.parametrize("maximum,expected", [(1, 1), (2, 2), (100, 3)])
 def test_initial_pool_uses_the_admitted_size_capped_by_shards(
     evaluator, fake_ray, monkeypatch, tmp_path, maximum, expected
 ):
@@ -236,6 +236,29 @@ def test_initial_pool_uses_the_admitted_size_capped_by_shards(
     assert ray.data.last_options["compute"].options["min_size"] == expected
     assert ray.data.last_options["compute"].options["max_size"] == expected
     assert len(result["distribution"]["worker_actor_ids"]) == expected
+
+
+@pytest.mark.parametrize("shape_count", [20, 100])
+def test_automatic_pool_covers_every_shape_with_one_gpu_worker(
+    evaluator, fake_ray, monkeypatch, tmp_path, shape_count
+):
+    local, reference, candidate, _ = evaluator
+    ray, _ = fake_ray
+    shape = next(iter(json.loads((reference / "shapes.json").read_text()).values()))
+    ids = sorted(str(i) for i in range(1, shape_count + 1))
+    (reference / "shapes.json").write_text(json.dumps({sid: shape for sid in ids}))
+    monkeypatch.setattr("atrex_bench.evaluate", lambda config: local(config["shape_ids"]))
+    config = config_for(reference, candidate, tmp_path / "out", ray_shapes_per_shard=1)
+    config.pop("ray_max_workers")
+    result = adapter.evaluate_ray_data(config)
+    assert result["shape_selection"]["selected_shape_ids"] == ids
+    assert result["distribution"]["max_workers"] == shape_count
+    assert result["distribution"]["shard_count"] == shape_count
+    assert len(set(result["distribution"]["worker_actor_ids"])) == shape_count
+    assert ray.data.last_options["compute"].options["min_size"] == shape_count
+    assert ray.data.last_options["num_gpus"] == 1
+    assert all(len(json.loads(row["shape_ids_json"])) == 1 for row in ray.data.last_rows)
+    assert all(handle.dead for handle in ray.handles)
 
 
 def test_runtime_diagnostics_normalize_ray_identity_objects(fake_ray, monkeypatch):

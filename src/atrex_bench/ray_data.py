@@ -48,12 +48,10 @@ def validate_distribution(config):
     mode = config.get("distribution", "local")
     if mode not in {"local", "ray_data"}:
         raise AtrexConfigError("distribution must be local or ray_data")
-    for key, default, maximum in (("ray_max_workers", 4, 31), ("ray_shapes_per_shard", 1, None)):
-        value = config.get(key, default)
-        if type(value) is not int or value < 1 or (maximum and value > maximum):
-            raise AtrexConfigError(
-                f"{key} must be an integer between 1 and {maximum or 'infinity'}"
-            )
+    for key in ("ray_max_workers", "ray_shapes_per_shard"):
+        value = config.get(key, 1)
+        if type(value) is not int or value < 1:
+            raise AtrexConfigError(f"{key} must be a positive integer")
     resources = config.get("ray_resources", {})
     selector = config.get("ray_node_selector", {})
     if not isinstance(resources, dict) or any(
@@ -335,7 +333,7 @@ def evaluate_ray_data(config):
     shards = [all_ids[index : index + size] for index in range(0, len(all_ids), size)]
     if not shards:
         raise AtrexConfigError("ray_data requires at least one shape")
-    maximum = min(config.get("ray_max_workers", 4), len(shards))
+    maximum = min(config.get("ray_max_workers", len(shards)), len(shards))
     namespace = (
         os.environ.get("AGATE_RAY_NAMESPACE")
         or config.get("ray_namespace")

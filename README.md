@@ -264,8 +264,9 @@ python scripts/run_eval.py --distribution ray_data --ray-max-workers 4 \
 ```
 
 The same options work in `evaluate(config)`. The CPU driver snapshots the full
-reference and evaluator sources; the bounded Ray Data pool starts at the requested
-size, capped by the shard count. Each actor reserves one GPU and runs the ordinary
+reference and evaluator sources. The Ray Data pool defaults to one GPU worker per
+shard; an explicit positive worker limit caps that count. Each actor reserves one
+GPU and runs the ordinary
 evaluator in fresh subprocesses. The report retains driver placement and per-shard
 actor/node IDs, interpreter, GPU assignment, and execution times so callers can
 verify worker overlap instead of inferring it from the configured maximum. These
