@@ -25,6 +25,7 @@ _DISTRIBUTION_KEYS = {
     "ray_resources",
     "ray_node_selector",
     "ray_namespace",
+    "ray_max_shard_retries",
 }
 _ADJACENT_SUFFIXES = {
     ".py",
@@ -52,6 +53,9 @@ def validate_distribution(config):
         value = config.get(key, 1)
         if type(value) is not int or value < 1:
             raise AtrexConfigError(f"{key} must be a positive integer")
+    retries = config.get("ray_max_shard_retries", 1)
+    if type(retries) is not int or not 0 <= retries <= 3:
+        raise AtrexConfigError("ray_max_shard_retries must be an integer from 0 to 3")
     resources = config.get("ray_resources", {})
     selector = config.get("ray_node_selector", {})
     if not isinstance(resources, dict) or any(
@@ -143,14 +147,41 @@ def _snapshot_sources(config):
 
 
 class _ActorRegistry:
-    def __init__(self):
-        self.handles = []
+    """Driver-owned commits survive GPU worker loss, including lost result replies."""
+
+    def __init__(self, max_retries=1):
+        self.handles = {}
+        self.max_retries = max_retries
+        self.results = {}
+        self.attempts = {}
 
     def register(self, handle):
-        self.handles.append(handle)
+        actor_id = handle._actor_id.hex()
+        restarted = actor_id in self.handles
+        self.handles[actor_id] = handle
+        return restarted
 
     def workers(self):
-        return self.handles
+        return list(self.handles.values())
+
+    def begin(self, shard_id, execution):
+        if shard_id in self.results:
+            return {"cached": self.results[shard_id]}
+        attempts = self.attempts.setdefault(shard_id, [])
+        if len(attempts) > self.max_retries:
+            raise RuntimeError(f"Ray shard {shard_id} exhausted its retry limit")
+        if attempts:
+            attempts[-1]["status"] = "worker_lost"
+        attempt = len(attempts) + 1
+        attempts.append({**execution, "attempt": attempt, "status": "running"})
+        return {"attempt": attempt}
+
+    def commit(self, shard_id, result, execution):
+        self.results[shard_id] = {"result_json": result, "execution_json": execution}
+        self.attempts[shard_id][-1].update(json.loads(execution), status="completed")
+
+    def progress(self):
+        return {"completed_shard_ids": sorted(self.results), "attempts": self.attempts}
 
 
 def _runtime_diagnostics(ray, *, actor=False):
@@ -196,7 +227,8 @@ class _ShardEvaluator:
         import ray
 
         _check_ray_version(ray)
-        ray.get(registry.register.remote(ray.get_runtime_context().current_actor))
+        self.registry = registry
+        restarted = ray.get(registry.register.remote(ray.get_runtime_context().current_actor))
         self.directory = tempfile.TemporaryDirectory(prefix="atrex-bench-ray-")
         self.root = Path(self.directory.name)
         self.read_fd, self.write_fd = os.pipe()
@@ -218,6 +250,12 @@ class _ShardEvaluator:
         self.config = {key: value for key, value in config.items() if key not in _DISTRIBUTION_KEYS}
         self.config.update({key: str(self.root / value) for key, value in bundle["paths"].items()})
         self.config["distribution"] = "local"
+        if restarted:
+            # The lost process's lifetime pipe terminates its GPU subprocess group.
+            # Do not start another evaluation while that bounded cleanup runs.
+            from atrex_bench._process_guard import WORKER_EXIT_GRACE_S
+
+            time.sleep(WORKER_EXIT_GRACE_S)
 
     def __del__(self):
         for name in ("write_fd", "read_fd"):
@@ -259,13 +297,25 @@ class _ShardEvaluator:
                     "shape_ids": config["shape_ids"],
                     "start_utc_ns": time.time_ns(),
                 }
+                admission = ray.get(self.registry.begin.remote(str(shard_id), execution))
+                if "cached" in admission:
+                    results.append(admission["cached"]["result_json"])
+                    executions.append(admission["cached"]["execution_json"])
+                    continue
+                execution["attempt"] = admission["attempt"]
+                print("[atrex-shard-attempt] " + json.dumps(execution), flush=True)
                 started = time.perf_counter_ns()
-                results.append(json.dumps(evaluate(config), allow_nan=False))
+                result = json.dumps(evaluate(config), allow_nan=False)
                 execution.update(
                     end_utc_ns=time.time_ns(),
                     duration_s=(time.perf_counter_ns() - started) / 1_000_000_000,
                 )
-                executions.append(json.dumps(execution, allow_nan=False))
+                encoded_execution = json.dumps(execution, allow_nan=False)
+                # Commit before returning to Data. A replay after object/worker loss
+                # reads this value and never invokes an already completed harness.
+                ray.get(self.registry.commit.remote(str(shard_id), result, encoded_execution))
+                results.append(result)
+                executions.append(encoded_execution)
             return {
                 "shard_id": batch["shard_id"],
                 "result_json": results,
@@ -334,6 +384,7 @@ def evaluate_ray_data(config):
     if not shards:
         raise AtrexConfigError("ray_data requires at least one shape")
     maximum = min(config.get("ray_max_workers", len(shards)), len(shards))
+    max_retries = config.get("ray_max_shard_retries", 1)
     namespace = (
         os.environ.get("AGATE_RAY_NAMESPACE")
         or config.get("ray_namespace")
@@ -346,6 +397,16 @@ def evaluate_ray_data(config):
         placement["label_selector"] = config["ray_node_selector"]
     registry = None
     actor_ids = []
+    data_context = ray.data.DataContext.get_current()
+    retry_context = {
+        key: getattr(data_context, key)
+        for key in ("actor_task_retry_on_errors", "retried_map_errors", "max_errored_blocks")
+    }
+    # Only Ray system failures may replay a map task; never retry user exceptions
+    # or silently drop a failed shard under an inherited DataContext setting.
+    data_context.actor_task_retry_on_errors = False
+    data_context.retried_map_errors = False
+    data_context.max_errored_blocks = 0
     # The evaluator wheel may exist only in the driver's deps. Serialize the
     # small adapter by value; its actors materialize the immutable Python
     # evaluator snapshot before importing the local SDK.
@@ -354,7 +415,12 @@ def evaluate_ray_data(config):
         ray.cloudpickle.register_pickle_by_value(sys.modules[__name__])
     try:
         driver = _runtime_diagnostics(ray)
-        registry = ray.remote(num_cpus=0)(_ActorRegistry).options(**placement).remote()
+        from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
+
+        registry = ray.remote(num_cpus=0, max_restarts=0)(_ActorRegistry).options(
+            name="atrex-bench-shards",
+            scheduling_strategy=NodeAffinitySchedulingStrategy(driver["node_id"], soft=False),
+        ).remote(max_retries)
         bundle = _snapshot_sources(config)
         rows = [
             {"shard_id": f"shape-{index:06d}", "shape_ids_json": json.dumps(ids)}
@@ -368,8 +434,8 @@ def evaluate_ray_data(config):
                 min_size=maximum, max_size=maximum, max_tasks_in_flight_per_actor=1
             ),
             fn_constructor_args=(bundle, config, registry),
-            max_restarts=0,
-            max_task_retries=0,
+            max_restarts=len(shards) * max_retries,
+            max_task_retries=max_retries,
             **placement,
         )
         results = dataset.take_all()
@@ -380,6 +446,7 @@ def evaluate_ray_data(config):
         results.sort(key=lambda row: row["shard_id"])
         merged = merge_evaluation_shards([json.loads(row["result_json"]) for row in results])
         executions = [json.loads(row["execution_json"]) for row in results]
+        progress = ray.get(registry.progress.remote())
     finally:
         try:
             if registry is not None:
@@ -393,6 +460,8 @@ def evaluate_ray_data(config):
                     if not already_registered:
                         ray.cloudpickle.unregister_pickle_by_value(sys.modules[__name__])
                 finally:
+                    for key, value in retry_context.items():
+                        setattr(data_context, key, value)
                     ray.shutdown()
     merged["distribution"] = {
         "schema_version": RAY_DATA_DISTRIBUTION_SCHEMA_VERSION,
@@ -406,6 +475,8 @@ def evaluate_ray_data(config):
         "driver": driver,
         "shards": executions,
         "worker_actor_ids": actor_ids,
+        "max_shard_retries": max_retries,
+        "shard_attempts": progress["attempts"],
         "ray_version": ray.__version__,
         "source_snapshot_sha256": hashlib.sha256(
             json.dumps(bundle["sha256"], sort_keys=True).encode()

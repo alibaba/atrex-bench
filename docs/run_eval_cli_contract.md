@@ -182,8 +182,9 @@ report = evaluate({
 | `distribution` | `local` | `local` or `ray_data`. |
 | `ray_max_workers` | shard count | Initial pool of one-GPU actors; an explicit positive integer caps it at the shard count. |
 | `ray_shapes_per_shard` | `1` | Positive number of consecutive original shape IDs per dataset row. |
-| `ray_resources` | `{}` | Ray custom resource requirements for workers and the CPU registry; positive numbers, excluding `CPU` and `GPU`. |
-| `ray_node_selector` | `{}` | Ray `label_selector` mapping for those actors. |
+| `ray_max_shard_retries` | `1` | Worker/node failure retries per shard, integer 0–3. The CLI also accepts `--ray-max-shard-retries`. |
+| `ray_resources` | `{}` | Ray custom resource requirements for GPU workers; positive numbers, excluding `CPU` and `GPU`. |
+| `ray_node_selector` | `{}` | Ray `label_selector` mapping for GPU workers; the zero-GPU registry stays on the driver node. |
 | `ray_namespace` | Generated | Optional standalone Ray namespace. Gateway `AGATE_RAY_NAMESPACE` overrides this field to isolate attempts. |
 
 The driver connects with `ray.init(address="auto")` and needs no GPU. Dataset
@@ -219,8 +220,18 @@ their input seeds and environment evidence are retained in the native report.
 
 Missing, duplicate, or incompatible shard results fail the distributed run.
 Normal compile/correctness/performance failures remain in the merged report
-and produce the usual failed verdict. Ray actor/task retries are disabled;
-an external caller can retry the entire evaluation. The final native report
+and produce the usual failed verdict without retry. Ray system failures retry the
+affected map task up to `ray_max_shard_retries`; user exceptions are not retried.
+A CPU registry on the driver node commits each completed shard before its worker
+returns, so even replay of a lost result or bundled task reuses completed reports
+without running their harness again. Registry attempt counts enforce the shard
+limit independently of map-task replay. Actor restarts are also finite, bounded by
+shard count times the retry limit, and never increase the admitted worker pool.
+Restarted workers wait for the previous subprocess cleanup grace period before
+starting evaluation. A driver/registry loss or exhausted retry limit fails the run;
+there is no cross-driver recovery or automatic replay of the whole evaluation.
+`distribution.max_shard_retries` and `distribution.shard_attempts` retain each
+started attempt, placement and committed outcome. The final native report
 has full `shape_selection` coverage and a `distribution` block with `mode`,
 logical `max_workers`, `shard_count`, source snapshot hash, namespace, driver
 job ID, and worker actor IDs. The capability marker is

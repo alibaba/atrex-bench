@@ -78,6 +78,12 @@ import ray
 last_options = None
 last_rows = None
 mutation = None
+class DataContext:
+    actor_task_retry_on_errors = False
+    retried_map_errors = False
+    max_errored_blocks = 0
+    @classmethod
+    def get_current(cls): return cls
 class ActorPoolStrategy:
     def __init__(self, **kwargs): self.options = kwargs
 class Dataset:
@@ -101,7 +107,18 @@ class Dataset:
             os.environ["CUDA_VISIBLE_DEVICES"] = "0"
             for index, row in enumerate(self.rows):
                 ray.current, actor = actors[index % count]
-                out = actor({key: [value] for key,value in row.items()})
+                for attempt in range(self.options["max_task_retries"] + 1):
+                    try:
+                        out = actor({key: [value] for key,value in row.items()})
+                        if mutation == "lost_reply" and attempt == 0:
+                            raise ray.exceptions.RayActorError("lost worker reply")
+                        break
+                    except ray.exceptions.RayActorError:
+                        if attempt == self.options["max_task_retries"]: raise
+                        actor.__del__()
+                        actor = self.cls(*self.options["fn_constructor_args"])
+                        ray.current.value = actor
+                        actors[index % count] = ray.current, actor
                 results.append({key: value[0] for key,value in out.items()})
         finally:
             ray.current = None
@@ -125,17 +142,23 @@ def fake_ray(tmp_path, monkeypatch):
     package.mkdir(parents=True)
     (package / "__init__.py").write_text(textwrap.dedent(FAKE_RAY))
     (package / "data.py").write_text(textwrap.dedent(FAKE_DATA))
+    (package / "util").mkdir()
+    (package / "util" / "__init__.py").write_text("")
+    (package / "util" / "scheduling_strategies.py").write_text(
+        "class NodeAffinitySchedulingStrategy:\n"
+        "    def __init__(self, node_id, soft): self.node_id, self.soft = node_id, soft\n"
+    )
     monkeypatch.syspath_prepend(str(package.parent))
     monkeypatch.setenv(
         "PYTHONPATH", str(package.parent) + os.pathsep + os.environ.get("PYTHONPATH", "")
     )
-    for name in ("ray", "ray.data"):
+    for name in ("ray", "ray.data", "ray.util", "ray.util.scheduling_strategies"):
         monkeypatch.delitem(sys.modules, name, raising=False)
     import ray
     import ray.data
 
     yield ray, package.parent
-    for name in ("ray", "ray.data"):
+    for name in ("ray", "ray.data", "ray.util", "ray.util.scheduling_strategies"):
         sys.modules.pop(name, None)
 
 
@@ -158,6 +181,9 @@ def config_for(reference, candidate, output, **overrides):
         {"ray_max_workers": True},
         {"ray_max_workers": 0},
         {"ray_shapes_per_shard": 0},
+        {"ray_max_shard_retries": -1},
+        {"ray_max_shard_retries": 4},
+        {"ray_max_shard_retries": True},
         {"ray_resources": {"GPU": 1}},
         {"ray_resources": {"worker": float("nan")}},
         {"ray_node_selector": {"x": 1}},
@@ -318,7 +344,8 @@ def test_retained_diagnostics_keep_each_shard_identity_and_monotonic_duration(
         assert row["pid"] == os.getpid()
         assert row["python_executable"] == sys.executable
         assert set(row) == set(driver) | {
-            "actor_id", "shard_id", "shape_ids", "start_utc_ns", "end_utc_ns", "duration_s"
+            "actor_id", "shard_id", "shape_ids", "start_utc_ns", "end_utc_ns",
+            "duration_s", "attempt"
         }
     # Fake actors run serially in this test. Retained identities/times do not
     # manufacture a claim of overlapping GPU execution.
@@ -402,13 +429,16 @@ assert not any("atrex-bench/src" in p for p in sys.path)
 actor_type, bundle, config = cloudpickle.loads(Path(sys.argv[1]).read_bytes())
 class Register:
     def remote(self, *args): return None
+class Begin:
+    def remote(self, *args): return {"attempt": 1}
 sys.modules["ray"] = types.SimpleNamespace(
     __version__="2.55.0", get=lambda x:x,
     get_gpu_ids=lambda: [0],
     get_runtime_context=lambda: types.SimpleNamespace(
         current_actor=None, get_job_id=lambda: "job-bootstrap",
         get_node_id=lambda: "node-bootstrap", get_actor_id=lambda: "actor-bootstrap"))
-actor = actor_type(bundle, config, types.SimpleNamespace(register=Register()))
+actor = actor_type(bundle, config, types.SimpleNamespace(
+    register=Register(), begin=Begin(), commit=Register()))
 import atrex_bench
 assert callable(atrex_bench.evaluate)
 atrex_bench.evaluate = lambda config: {"shape_ids": config["shape_ids"]}
@@ -431,7 +461,7 @@ print("bootstrapped")
         timeout=10,
     )
     assert process.returncode == 0, process.stderr
-    assert process.stdout.strip() == "bootstrapped"
+    assert process.stdout.strip().endswith("bootstrapped")
 
 
 def test_ray_version_rejected_before_connection(evaluator, fake_ray, tmp_path):
@@ -739,3 +769,122 @@ def test_actor_lifetime_janitor_removes_private_sources(tmp_path):
         if janitor.poll() is None:
             janitor.kill()
             janitor.wait()
+
+
+def _retry_fixture(tmp_path, monkeypatch):
+    reference = tmp_path / 'retry_reference'
+    reference.mkdir()
+    (reference / 'shapes.json').write_text(json.dumps({str(i): {} for i in range(20)}))
+    candidate = tmp_path / 'retry_candidate.py'
+    candidate.write_text('class Model: pass\n')
+    monkeypatch.setattr(adapter, '_start_directory_janitor', lambda *args: None)
+    monkeypatch.setattr(adapter.time, 'sleep', lambda seconds: None)
+    monkeypatch.setattr('atrex_bench.merge_evaluation_shards', lambda rows: {'rows': rows})
+    return config_for(reference, candidate, tmp_path / 'output', ray_shapes_per_shard=1)
+
+
+def test_only_ten_lost_workers_retry_in_twenty_shards(fake_ray, monkeypatch, tmp_path):
+    from collections import Counter
+
+    ray, _ = fake_ray
+    config = _retry_fixture(tmp_path, monkeypatch)
+    calls = Counter()
+
+    def run(config):
+        sid = config['shape_ids'][0]
+        calls[sid] += 1
+        if int(sid) < 10 and calls[sid] == 1:
+            raise ray.exceptions.RayActorError('injected worker loss')
+        return {'shape_id': sid}
+
+    monkeypatch.setattr('atrex_bench.evaluate', run)
+    result = adapter.evaluate_ray_data(config)
+    assert len(result['rows']) == 20
+    assert set(row['shape_id'] for row in result['rows']) == set(map(str, range(20)))
+    assert sum(calls.values()) == 30
+    assert all(calls[str(i)] == (2 if i < 10 else 1) for i in range(20))
+    attempts = result['distribution']['shard_attempts']
+    assert sum(len(rows) for rows in attempts.values()) == 30
+    assert sum(row['status'] == 'worker_lost' for rows in attempts.values() for row in rows) == 10
+    assert len(result['distribution']['worker_actor_ids']) == 2
+    assert ray.data.last_options['num_gpus'] == 1
+    assert ray.data.last_options['max_task_retries'] == 1
+    assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
+
+
+def test_committed_shards_survive_lost_worker_replies(fake_ray, monkeypatch, tmp_path):
+    from collections import Counter
+
+    ray, _ = fake_ray
+    config = _retry_fixture(tmp_path, monkeypatch)
+    calls = Counter()
+
+    def run(config):
+        sid = config['shape_ids'][0]
+        calls[sid] += 1
+        return {'shape_id': sid}
+
+    ray.data.mutation = 'lost_reply'
+    monkeypatch.setattr('atrex_bench.evaluate', run)
+    result = adapter.evaluate_ray_data(config)
+    assert len(result['rows']) == 20
+    assert len(calls) == 20 and set(calls.values()) == {1}
+    assert sum(len(rows) for rows in result['distribution']['shard_attempts'].values()) == 20
+    assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
+
+
+@pytest.mark.parametrize('retries', [0, 1, 3])
+def test_worker_retry_exhaustion_is_bounded_and_drains(fake_ray, monkeypatch, tmp_path, retries):
+    ray, _ = fake_ray
+    config = _retry_fixture(tmp_path, monkeypatch)
+    config['ray_max_shard_retries'] = retries
+    calls = []
+
+    def run(config):
+        calls.append(config['shape_ids'])
+        raise ray.exceptions.RayActorError('worker unavailable')
+
+    monkeypatch.setattr('atrex_bench.evaluate', run)
+    with pytest.raises(ray.exceptions.RayActorError):
+        adapter.evaluate_ray_data(config)
+    assert len(calls) == retries + 1
+    assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
+
+
+def test_application_error_is_not_retried_and_context_is_restored(fake_ray, monkeypatch, tmp_path):
+    ray, _ = fake_ray
+    config = _retry_fixture(tmp_path, monkeypatch)
+    calls = []
+    context = ray.data.DataContext.get_current()
+    context.actor_task_retry_on_errors = True
+    context.retried_map_errors = True
+    context.max_errored_blocks = 100
+
+    def run(config):
+        assert context.actor_task_retry_on_errors is False
+        assert context.retried_map_errors is False
+        assert context.max_errored_blocks == 0
+        calls.append(config['shape_ids'])
+        raise ValueError('candidate/config error')
+
+    monkeypatch.setattr('atrex_bench.evaluate', run)
+    with pytest.raises(ValueError, match='candidate/config error'):
+        adapter.evaluate_ray_data(config)
+    assert len(calls) == 1
+    assert context.actor_task_retry_on_errors is True
+    assert context.retried_map_errors is True
+    assert context.max_errored_blocks == 100
+    assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
+
+
+def test_registry_bounds_retries_even_if_a_map_bundle_is_replayed():
+    registry = adapter._ActorRegistry(max_retries=1)
+    assert registry.begin('failed', {}) == {'attempt': 1}
+    assert registry.begin('failed', {}) == {'attempt': 2}
+    with pytest.raises(RuntimeError, match='retry limit'):
+        registry.begin('failed', {})
+    registry.begin('done', {})
+    registry.commit('done', '{"passed":true}', '{"attempt":1}')
+    for _ in range(5):
+        assert registry.begin('done', {})['cached']['result_json'] == '{"passed":true}'
+    assert len(registry.progress()['attempts']['done']) == 1

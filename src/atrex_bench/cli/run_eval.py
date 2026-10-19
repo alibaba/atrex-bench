@@ -135,6 +135,7 @@ _RUNNER_CONFIG_KEYS = frozenset(
         "distribution",
         "ray_max_workers",
         "ray_shapes_per_shard",
+        "ray_max_shard_retries",
         "ray_resources",
         "ray_node_selector",
         "ray_namespace",
@@ -4680,6 +4681,8 @@ def main() -> None:
                         help="Maximum Ray GPU workers (positive integer; defaults to shard count)")
     parser.add_argument("--ray-shapes-per-shard", type=int, default=None,
                         help="Original shapes per Ray work item (default 1)")
+    parser.add_argument("--ray-max-shard-retries", type=int, default=None,
+                        help="Worker/node failure retries per shard (0-3; default 1)")
     parser.add_argument("--ray-namespace", default=None,
                         help="Standalone Ray namespace; gateway attempt namespace takes precedence")
     args = parser.parse_args()

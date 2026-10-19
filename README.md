@@ -277,6 +277,10 @@ GPU model/architecture and software runtime must still match. Install
 `atrex-bench[ray]` with matching native dependencies in the driver and worker
 images. See the [Ray Data runtime and cleanup contract](docs/run_eval_cli_contract.md#automatic-ray-data-distribution)
 for file transport, clock locking, ABBA, and lifecycle requirements.
+Worker/node failures retry only the affected shard (one retry by default). Successful
+shard reports are committed on the driver node and reused even if their worker reply
+is lost. Candidate failures are not retried. The admitted GPU worker limit remains
+unchanged; a driver/registry loss fails the run instead of replaying successful work.
 
 ## Repository Layout
 
