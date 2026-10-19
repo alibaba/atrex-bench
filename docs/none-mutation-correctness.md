@@ -62,9 +62,11 @@ declared mutations:
 }
 ```
 
-`default` applies to floating outputs without a path-specific policy. The
-remaining keys must match a value actually compared; stale or misspelled paths
-fail evaluation. Every policy requires `atol` and `rtol`; omitted
+`default` applies only to floating return values under `output` without a
+path-specific policy. It does not apply to declared mutations; each mutation
+that needs a metadata-owned policy must use an explicit `mutated_inputs.<key>`
+path. The remaining keys must match a value actually compared; stale or
+misspelled paths fail evaluation. Every policy requires `atol` and `rtol`; omitted
 `max_mismatch_fraction` means zero and omitted `max_rel_l2` means no additional
 L2 bound. Fractions use units of one: **0.001 means 0.1%, not 0.001%**.
 

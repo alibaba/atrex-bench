@@ -469,7 +469,14 @@ def _compare_value_trees(
     reference_tensor = flatten_outputs(reference)[0][1]
     candidate_tensor = flatten_outputs(candidate)[0][1]
     policies = output_tolerances or {}
-    tolerance = policies.get(logical_name, policies.get("default"))
+    tolerance = policies.get(logical_name)
+    is_output_path = (
+        logical_name == "output"
+        or logical_name.startswith("output[")
+        or logical_name.startswith("output.")
+    )
+    if tolerance is None and is_output_path:
+        tolerance = policies.get("default")
     if logical_name in policies and matched_tolerance_paths is not None:
         matched_tolerance_paths.add(logical_name)
     return [

@@ -83,6 +83,36 @@ def test_mutation_tolerance_and_scratch_input(tmp_path):
     )
 
 
+def test_default_output_policy_does_not_apply_to_mutated_inputs(tmp_path):
+    reference, candidate = _write_problem(
+        tmp_path,
+        reference_body="out.fill_(1); return x",
+        candidate_body="out.fill_(2); return x",
+        contract={
+            "mutates_inputs": ["out"],
+            "correctness_tolerances": {
+                "default": {
+                    "atol": 0.0,
+                    "rtol": 0.0,
+                    "max_mismatch_fraction": 1.0,
+                }
+            },
+        },
+        inputs="[torch.zeros(4), torch.zeros(4), torch.zeros(4)]",
+    )
+
+    result = check_correctness(reference, candidate, device="cpu")
+
+    assert result.status == "failed"
+    mutation = result.cases[0].mutated_inputs[0]
+    assert not mutation.passed
+    assert mutation.mismatched_elements == 4
+    assert mutation.allowed_mismatched_elements == 0
+    assert mutation.tolerance["atol"] == 0.01
+    assert mutation.tolerance["rtol"] == 0.05
+    assert mutation.tolerance["max_mismatch_fraction"] == 0.0
+
+
 def test_metadata_minimum_cases_is_a_floor(tmp_path):
     reference, candidate = _write_problem(
         tmp_path,
