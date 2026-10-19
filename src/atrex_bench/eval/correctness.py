@@ -8,6 +8,7 @@ import math
 import os
 import traceback
 from dataclasses import dataclass, field, replace
+from fractions import Fraction
 from pathlib import Path
 
 import torch
@@ -33,6 +34,7 @@ from atrex_bench.eval.reward_hack import (
 )
 
 _DEFAULT_CANDIDATE_TIMEOUT_S = 60
+_COMPARISON_CHUNK_ELEMENTS = 1 << 20
 CORRECTNESS_MAX_REL_L2_ENV = "ATREX_CORRECTNESS_MAX_REL_L2"
 
 
@@ -40,11 +42,9 @@ CORRECTNESS_MAX_REL_L2_ENV = "ATREX_CORRECTNESS_MAX_REL_L2"
 class OutputDiff:
     """Per-output comparison result for one correctness case.
 
-    Fields match the data schema spec, Section 7 outputs entry exactly:
-    ``name`` / ``passed`` / ``max_elementwise_abs_diff`` /
-    ``max_elementwise_rel_diff`` / ``error``. dtype / shape are intentionally
-    not recorded — they are derivable from metadata.json.output_dtypes and
-    do not have a real consumer.
+    Dtype and shape are intentionally omitted because metadata owns them.
+    Numerical receipts include the effective policy and mismatch counts so a
+    caller can audit why a tensor passed without retaining full output values.
     """
 
     name: str
@@ -53,6 +53,10 @@ class OutputDiff:
     max_elementwise_rel_diff: float | None = None
     relative_l2: float | None = None
     error: str | None = None
+    mismatched_elements: int | None = None
+    total_elements: int | None = None
+    allowed_mismatched_elements: int | None = None
+    tolerance: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -61,6 +65,8 @@ class OutputTolerance:
 
     atol: float
     rtol: float
+    max_mismatch_fraction: float = 0.0
+    max_rel_l2: float | None = None
 
 
 @dataclass(frozen=True)
@@ -219,6 +225,21 @@ def configured_max_rel_l2(explicit: float | None = None) -> float | None:
     return value
 
 
+def _comparison_chunks(reference, candidate):
+    """Yield bounded matching views, including noncontiguous logical tensors."""
+    if reference.numel() <= _COMPARISON_CHUNK_ELEMENTS:
+        yield reference, candidate
+        return
+    axis = max(range(reference.ndim), key=lambda index: reference.shape[index])
+    size = reference.shape[axis]
+    half = size // 2
+    for start, length in ((0, half), (half, size - half)):
+        yield from _comparison_chunks(
+            reference.narrow(axis, start, length),
+            candidate.narrow(axis, start, length),
+        )
+
+
 def _compare_output_tensors(
     reference_tensor: torch.Tensor,
     candidate_tensor: torch.Tensor,
@@ -228,6 +249,8 @@ def _compare_output_tensors(
     rtol: float,
     max_rel_l2: float | None = None,
     strict_dtype: bool = False,
+    max_mismatch_fraction: float = 0.0,
+    max_rel_l2_bound: float | None = None,
 ) -> OutputDiff:
     """Compare a pair of output tensors and return the per-output diff record."""
     if strict_dtype and reference_tensor.dtype != candidate_tensor.dtype:
@@ -249,10 +272,39 @@ def _compare_output_tensors(
 
     error: str | None = None
     if torch.is_floating_point(reference_tensor) or torch.is_floating_point(candidate_tensor):
-        reference_float = reference_tensor.detach().to(torch.float64)
-        candidate_float = candidate_tensor.detach().to(torch.float64)
-        ref_is_finite = bool(torch.isfinite(reference_float).all().item())
-        cand_is_finite = bool(torch.isfinite(candidate_float).all().item())
+        ref_is_finite = cand_is_finite = True
+        reference_norm = candidate_norm = diff_l2 = 0.0
+        max_elementwise_abs_diff = max_elementwise_rel_diff = 0.0
+        mismatched = 0
+        for ref_chunk, cand_chunk in _comparison_chunks(reference_tensor, candidate_tensor):
+            reference_float = ref_chunk.detach().to(torch.float64)
+            candidate_float = cand_chunk.detach().to(torch.float64)
+            ref_is_finite &= bool(torch.isfinite(reference_float).all().item())
+            cand_is_finite &= bool(torch.isfinite(candidate_float).all().item())
+            if not ref_is_finite or not cand_is_finite:
+                continue
+            reference_norm = math.hypot(
+                reference_norm, torch.linalg.vector_norm(reference_float).item()
+            )
+            candidate_norm = math.hypot(
+                candidate_norm, torch.linalg.vector_norm(candidate_float).item()
+            )
+            abs_diff = (reference_float - candidate_float).abs()
+            diff_l2 = math.hypot(diff_l2, torch.linalg.vector_norm(abs_diff).item())
+            if abs_diff.numel():
+                max_elementwise_abs_diff = max(
+                    max_elementwise_abs_diff, abs_diff.max().item()
+                )
+                denominator = reference_float.abs().clamp_min(max(atol, 1e-12))
+                max_elementwise_rel_diff = max(
+                    max_elementwise_rel_diff,
+                    (abs_diff / denominator).max().item(),
+                )
+            # Preserve the historical torch.allclose(reference, candidate)
+            # argument direction: the relative term scales with candidate.
+            mismatched += int(
+                (abs_diff > atol + rtol * candidate_float.abs()).sum().item()
+            )
         if not ref_is_finite or not cand_is_finite:
             return OutputDiff(
                 name=name,
@@ -266,32 +318,24 @@ def _compare_output_tensors(
                 ),
             )
 
-        reference_norm = torch.linalg.vector_norm(reference_float)
-        candidate_norm = torch.linalg.vector_norm(candidate_float)
-        candidate_is_zero = (
-            float(reference_norm.item()) > 0.0 and float(candidate_norm.item()) == 0.0
-        )
-
-        abs_diff = (reference_float - candidate_float).abs()
-        max_elementwise_abs_diff = float(abs_diff.max().item()) if abs_diff.numel() else 0.0
-        denominator = reference_float.abs().clamp_min(max(atol, 1e-12))
-        max_elementwise_rel_diff = (
-            float((abs_diff / denominator).max().item()) if abs_diff.numel() else 0.0
-        )
-        diff_l2 = torch.linalg.vector_norm(reference_float - candidate_float)
-        relative_l2 = float((diff_l2 / reference_norm.clamp_min(1e-12)).item())
+        candidate_is_zero = reference_norm > 0.0 and candidate_norm == 0.0
+        relative_l2 = diff_l2 / max(reference_norm, 1e-12)
+        fraction = Fraction(str(max_mismatch_fraction))
+        allowed = reference_tensor.numel() * fraction.numerator // fraction.denominator
         passed = (
             relative_l2 <= max_rel_l2
             if max_rel_l2 is not None
-            else bool(
-                torch.allclose(
-                    reference_float,
-                    candidate_float,
-                    atol=atol,
-                    rtol=rtol,
-                )
-            )
+            else mismatched <= allowed
         )
+        if max_rel_l2_bound is not None:
+            # Metadata max_rel_l2 is conjunctive with the elementwise rule,
+            # unlike the legacy CLI/environment L2-only mode above.
+            l2_passed = (
+                max_elementwise_abs_diff == 0.0
+                if reference_norm == 0.0
+                else relative_l2 <= max_rel_l2_bound
+            )
+            passed = passed and l2_passed
         if candidate_is_zero and not passed:
             error = "Candidate output is all zero while reference output is non-zero"
     else:
@@ -299,6 +343,8 @@ def _compare_output_tensors(
         max_elementwise_abs_diff = 0.0 if passed else 1.0
         max_elementwise_rel_diff = 0.0 if passed else 1.0
         relative_l2 = None
+        mismatched = int((reference_tensor != candidate_tensor).sum().item())
+        allowed = 0
 
     return OutputDiff(
         name=name,
@@ -307,6 +353,23 @@ def _compare_output_tensors(
         max_elementwise_rel_diff=max_elementwise_rel_diff,
         relative_l2=relative_l2,
         error=error,
+        mismatched_elements=mismatched,
+        total_elements=reference_tensor.numel(),
+        allowed_mismatched_elements=allowed,
+        tolerance={
+            "atol": atol,
+            "rtol": rtol,
+            "max_mismatch_fraction": max_mismatch_fraction,
+            "max_rel_l2": max_rel_l2_bound,
+            "relative_to": "candidate",
+            "mode": (
+                "exact"
+                if relative_l2 is None
+                else "legacy_relative_l2"
+                if max_rel_l2 is not None
+                else "elementwise_and_l2"
+            ),
+        },
     )
 
 
@@ -371,8 +434,9 @@ def _compare_value_trees(
     # list/tuple interoperability for benchmarks without an explicit contract.
     reference_tensor = flatten_outputs(reference)[0][1]
     candidate_tensor = flatten_outputs(candidate)[0][1]
-    tolerance = (output_tolerances or {}).get(logical_name)
-    if tolerance is not None and matched_tolerance_paths is not None:
+    policies = output_tolerances or {}
+    tolerance = policies.get(logical_name, policies.get("default"))
+    if logical_name in policies and matched_tolerance_paths is not None:
         matched_tolerance_paths.add(logical_name)
     return [
         _compare_output_tensors(
@@ -383,6 +447,10 @@ def _compare_value_trees(
             rtol=tolerance.rtol if tolerance is not None else rtol,
             max_rel_l2=max_rel_l2,
             strict_dtype=strict_types,
+            max_mismatch_fraction=(
+                tolerance.max_mismatch_fraction if tolerance is not None else 0.0
+            ),
+            max_rel_l2_bound=(tolerance.max_rel_l2 if tolerance is not None else None),
         )
     ]
 
@@ -416,7 +484,7 @@ def _load_output_tolerance_contract(reference_path: Path) -> dict[str, OutputTol
     tolerances: dict[str, OutputTolerance] = {}
     for raw_path, raw_policy in raw_tolerances.items():
         is_output_path = isinstance(raw_path, str) and (
-            raw_path == "output"
+            raw_path in ("default", "output")
             or raw_path.startswith("output[")
             or raw_path.startswith("output.")
         )
@@ -430,7 +498,9 @@ def _load_output_tolerance_contract(reference_path: Path) -> dict[str, OutputTol
             )
         if not isinstance(raw_policy, dict):
             raise TypeError(f"correctness_tolerances[{raw_path!r}] must be an object")
-        unknown = sorted(set(raw_policy) - {"atol", "rtol"})
+        unknown = sorted(
+            set(raw_policy) - {"atol", "rtol", "max_mismatch_fraction", "max_rel_l2"}
+        )
         if unknown:
             raise ValueError(
                 f"correctness_tolerances[{raw_path!r}] has unknown fields: {unknown}"
@@ -449,7 +519,27 @@ def _load_output_tolerance_contract(reference_path: Path) -> dict[str, OutputTol
                 f"correctness_tolerances[{raw_path!r}] must contain finite, "
                 "non-negative atol and rtol"
             )
-        tolerances[raw_path] = OutputTolerance(atol=tensor_atol, rtol=tensor_rtol)
+        mismatch_fraction = float(raw_policy.get("max_mismatch_fraction", 0.0))
+        raw_l2 = raw_policy.get("max_rel_l2")
+        tensor_max_rel_l2 = float(raw_l2) if raw_l2 is not None else None
+        if not math.isfinite(mismatch_fraction) or not 0.0 <= mismatch_fraction <= 1.0:
+            raise ValueError(
+                f"correctness_tolerances[{raw_path!r}].max_mismatch_fraction "
+                "must be finite and between 0 and 1"
+            )
+        if tensor_max_rel_l2 is not None and (
+            not math.isfinite(tensor_max_rel_l2) or tensor_max_rel_l2 < 0.0
+        ):
+            raise ValueError(
+                f"correctness_tolerances[{raw_path!r}].max_rel_l2 "
+                "must be finite and non-negative"
+            )
+        tolerances[raw_path] = OutputTolerance(
+            atol=tensor_atol,
+            rtol=tensor_rtol,
+            max_mismatch_fraction=mismatch_fraction,
+            max_rel_l2=tensor_max_rel_l2,
+        )
     return tolerances
 
 
@@ -758,7 +848,7 @@ def check_correctness(
                             _check_unchanged(before, state[key], name=f"{role}.input.{key}")
                         )
             unmatched_tolerance_paths = sorted(
-                set(output_tolerances) - matched_tolerance_paths
+                set(output_tolerances) - {"default"} - matched_tolerance_paths
             )
             if unmatched_tolerance_paths:
                 raise ValueError(
