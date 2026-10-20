@@ -2,6 +2,7 @@
 
 import json
 import os
+import signal
 import subprocess
 import sys
 import textwrap
@@ -421,7 +422,7 @@ def test_actor_bootstraps_without_installed_bench(evaluator, tmp_path):
     target = tmp_path / "actor.pkl"
     target.write_bytes(serialized)
     bootstrap = """
-import sys, types
+import os, sys, types
 from pathlib import Path
 import cloudpickle
 assert "atrex_bench" not in sys.modules
@@ -437,8 +438,10 @@ sys.modules["ray"] = types.SimpleNamespace(
     get_runtime_context=lambda: types.SimpleNamespace(
         current_actor=None, get_job_id=lambda: "job-bootstrap",
         get_node_id=lambda: "node-bootstrap", get_actor_id=lambda: "actor-bootstrap"))
+os.environ["PYTHONPATH"] = "/driver/local-deps:/image/custom-python"
 actor = actor_type(bundle, config, types.SimpleNamespace(
     register=Register(), begin=Begin(), commit=Register()))
+assert all(Path(p).is_relative_to(actor.root) for p in os.environ["PYTHONPATH"].split(os.pathsep))
 import atrex_bench
 assert callable(atrex_bench.evaluate)
 atrex_bench.evaluate = lambda config: {"shape_ids": config["shape_ids"]}
@@ -488,6 +491,109 @@ def test_pickle_registry_restored_after_failure(
         adapter.evaluate_ray_data(config_for(reference, candidate, tmp_path / "output"))
     assert ray.cloudpickle.list_registry_pickle_by_value() == expected
     assert ray.shutdown_called
+
+
+@pytest.mark.parametrize("stage", ["ray_init", "context", "register", "register_after_mutation"])
+def test_partial_initialization_restores_state(evaluator, fake_ray, monkeypatch, tmp_path, stage):
+    _, reference, candidate, _ = evaluator
+    ray, _ = fake_ray
+    context = ray.data.DataContext
+    context.actor_task_retry_on_errors = True
+    context.retried_map_errors = ["existing error"]
+    context.max_errored_blocks = 7
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("setup interrupted")
+
+    if stage == "ray_init":
+        monkeypatch.setattr(ray, "init", fail)
+    elif stage == "context":
+        class PartialContext:
+            actor_task_retry_on_errors = True
+            retried_map_errors = ["existing error"]
+            max_errored_blocks = 7
+
+            def __setattr__(self, name, value):
+                if name == "max_errored_blocks" and value == 0:
+                    raise RuntimeError("setup interrupted")
+                super().__setattr__(name, value)
+
+        context = PartialContext()
+        monkeypatch.setattr(ray.data.DataContext, "get_current", lambda: context)
+    else:
+        def register(module):
+            if stage == "register_after_mutation":
+                ray.pickle_registry.add(module.__name__)
+            fail()
+        monkeypatch.setattr(ray.cloudpickle, "register_pickle_by_value", register)
+
+    with pytest.raises(AtrexConfigError, match="Ray initialization failed: setup interrupted"):
+        adapter.evaluate_ray_data(config_for(reference, candidate, tmp_path / "out"))
+    assert context.actor_task_retry_on_errors is True
+    assert context.retried_map_errors == ["existing error"]
+    assert context.max_errored_blocks == 7
+    assert not ray.cloudpickle.list_registry_pickle_by_value()
+    assert ray.shutdown_called
+    assert not ray.handles
+
+
+@pytest.mark.parametrize("contents", [None, "{", "{}", '["10", "10"]', '[null]'])
+def test_invalid_shape_file_is_config_error_before_connecting(
+    evaluator, fake_ray, tmp_path, contents
+):
+    _, reference, candidate, _ = evaluator
+    ray, _ = fake_ray
+    path = reference / "shapes.json"
+    if contents is None:
+        path.unlink()
+    else:
+        path.write_text(contents)
+    with pytest.raises(AtrexConfigError, match="Invalid Ray shape set"):
+        adapter.evaluate_ray_data(config_for(reference, candidate, tmp_path / "out"))
+    assert ray.initialized is None
+
+
+def test_cleanup_failure_preserves_primary_error(
+    evaluator, fake_ray, monkeypatch, tmp_path, capsys
+):
+    local, reference, candidate, _ = evaluator
+    ray, _ = fake_ray
+    monkeypatch.setattr("atrex_bench.evaluate", lambda config: local(config["shape_ids"]))
+    ray.data.mutation = "exception"
+
+    def stalled(*args):
+        raise RuntimeError("registry did not terminate")
+
+    monkeypatch.setattr(adapter, "_terminate_registry", stalled)
+    with pytest.raises(RuntimeError, match="^worker lost$"):
+        adapter.evaluate_ray_data(config_for(reference, candidate, tmp_path / "out"))
+    assert "[atrex-ray-cleanup] RuntimeError: registry did not terminate" in capsys.readouterr().err
+    assert not ray.cloudpickle.list_registry_pickle_by_value()
+    assert ray.shutdown_called
+
+
+def test_registry_does_not_claim_shared_namespace_name(
+    evaluator, fake_ray, monkeypatch, tmp_path
+):
+    local, reference, candidate, _ = evaluator
+    ray, _ = fake_ray
+    foreign_registry = ray.Handle()
+    original_options = ray.Remote.options
+
+    def options(remote, **kwargs):
+        # Another driver already owns this namespace's historical fixed name.
+        if kwargs.get("name") == "atrex-bench-shards":
+            raise ValueError("actor name already exists")
+        return original_options(remote, **kwargs)
+
+    monkeypatch.setattr(ray.Remote, "options", options)
+    monkeypatch.setattr("atrex_bench.evaluate", lambda config: local(config["shape_ids"]))
+    result = adapter.evaluate_ray_data(
+        config_for(reference, candidate, tmp_path / "out", ray_namespace="shared")
+    )
+    assert result["shape_selection"]["selected_shape_ids"] == IDS
+    assert not foreign_registry.dead
+    assert all(handle.dead for handle in ray.handles[1:])
 
 
 def test_registry_termination_failure_still_disconnects(evaluator, fake_ray, monkeypatch, tmp_path):
@@ -661,6 +767,28 @@ def test_sdk_optional_ray_dependency_error_is_config_error(evaluator, fake_ray, 
         evaluate(config_for(reference, candidate, tmp_path / "out"))
 
 
+@pytest.mark.parametrize("returncode", [0, 23, -signal.SIGTERM, -signal.SIGKILL])
+def test_guard_preserves_child_exit_status(monkeypatch, returncode):
+    read_fd, write_fd = os.pipe()
+    monkeypatch.setenv(LIFETIME_FD_ENV, str(read_fd))
+    code = (
+        f"import os; os.kill(os.getpid(), {-returncode})" if returncode < 0
+        else f"import sys; sys.exit({returncode})"
+    )
+    process = supervised_popen(
+        [sys.executable, "-c", code], start_new_session=True,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        assert process.wait(timeout=8) == returncode
+    finally:
+        os.close(write_fd)
+        os.close(read_fd)
+        if process.poll() is None:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait()
+
+
 def test_actor_death_guard_kills_stubborn_child(tmp_path, monkeypatch):
     read_fd, write_fd = os.pipe()
     monkeypatch.setenv(LIFETIME_FD_ENV, str(read_fd))
@@ -806,7 +934,8 @@ def test_only_ten_lost_workers_retry_in_twenty_shards(fake_ray, monkeypatch, tmp
     assert all(calls[str(i)] == (failures + 1 if i < 10 else 1) for i in range(20))
     attempts = result['distribution']['shard_attempts']
     assert sum(len(rows) for rows in attempts.values()) == 20 + 10 * failures
-    assert sum(row['status'] == 'worker_lost' for rows in attempts.values() for row in rows) == 10 * failures
+    lost = sum(row['status'] == 'worker_lost' for rows in attempts.values() for row in rows)
+    assert lost == 10 * failures
     assert len(result['distribution']['worker_actor_ids']) == 2
     assert ray.data.last_options['num_gpus'] == 1
     assert ray.data.last_options['max_task_retries'] == 3
@@ -883,7 +1012,10 @@ def test_application_error_is_not_retried_and_context_is_restored(fake_ray, monk
 
 @pytest.mark.parametrize('retries', [None, 0, 1, 2, 3])
 def test_registry_bounds_retries_even_if_a_map_bundle_is_replayed(retries):
-    registry = adapter._ActorRegistry() if retries is None else adapter._ActorRegistry(max_retries=retries)
+    registry = (
+        adapter._ActorRegistry() if retries is None
+        else adapter._ActorRegistry(max_retries=retries)
+    )
     limit = 3 if retries is None else retries
     for attempt in range(1, limit + 2):
         assert registry.begin('failed', {}) == {'attempt': attempt}

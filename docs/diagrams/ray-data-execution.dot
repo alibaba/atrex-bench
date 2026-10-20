@@ -1,0 +1,26 @@
+digraph execution {
+  graph [rankdir=TB, bgcolor="white", pad=0.3, nodesep=0.35, ranksep=0.55,
+         fontname="Helvetica", fontsize=18, label="Ray Data evaluation: N shards, at most K GPU workers", labelloc=t];
+  node [shape=box, style="rounded,filled", fillcolor="#edf4fb", color="#446683",
+        fontname="Helvetica", fontsize=13, margin="0.16,0.11"];
+  edge [fontname="Helvetica", fontsize=11, color="#536577"];
+  driver [label="CPU driver · caller allocates 0 GPUs + empty CUDA mask\nevaluate_ray_data(config)\nValidate shapes; snapshot Python sources + hashes"];
+  rows [label="Ray Data · N rows, one shape per row by default\nK = min(ray_max_workers, N); one in-flight task / actor\nRows beyond available workers wait for scheduling"];
+  worker [label="K × _ShardEvaluator actors · 1 GPU each\nValidate / materialize source snapshot\nFresh local evaluate(config) for each shard", fillcolor="#e7f4ed"];
+  registry [label="Unnamed CPU registry · 0 GPUs, driver node\n_ActorRegistry.begin / commit\nAttempt counts + stale-attempt fencing\nCommitted reports reused on replay", fillcolor="#fff3d8"];
+  harness [label="Per-shard process chain\nsupervisor → run_eval CLI → supervisor → subworker\nCompile → correctness → performance (or A-B-B-A)\nNative dependencies come from worker image", fillcolor="#e7f4ed"];
+  merge [label="merge_evaluation_shards\nRequire complete, unique coverage + compatible evidence\nOne eval_result.json with per-shard diagnostics"];
+  cleanup [label="Owned cleanup in driver finally\nKill + confirm registered actors; terminate registry\nRestore DataContext / cloudpickle state; ray.shutdown()", fillcolor="#f3edf8"];
+  lifetime [label="Actor-owned lifetime pipe\nEOF → INT / TERM / KILL process-group cleanup\nWatchdog kills survivors after supervisor exits\nJanitor removes private files after actor death", fillcolor="#f3edf8"];
+  driver -> rows [label="snapshot + stable shard IDs"];
+  rows -> worker [label="map_batches(batch_size=1)"];
+  worker -> harness [label="new subprocesses"];
+  worker -> registry [label="begin: cached report or next attempt"];
+  harness -> registry [label="worker commits report before returning"];
+  registry -> merge [style=dashed, label="committed reports via dataset results"];
+  merge -> cleanup;
+  worker -> lifetime [style=dashed, label="only actor holds pipe writer"];
+  lifetime -> harness [style=dashed, label="supervises process groups"];
+  {rank=same; worker; registry;}
+  {rank=same; harness; lifetime;}
+}

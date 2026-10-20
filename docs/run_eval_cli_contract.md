@@ -150,6 +150,9 @@ distribution also requires the capability described below.
 
 ### Automatic Ray Data distribution
 
+See the rendered [architecture and failure-path diagrams](ray_data_architecture.md)
+for component interactions and their implementation entry points.
+
 The installed CLI owns automatic shape splitting, GPU worker placement, and
 merging. The wrapper `scripts/run_eval.py` and the unchanged `evaluate(config)`
 SDK invoke this same CLI. Local execution remains the default. Install the
@@ -207,7 +210,10 @@ is serialized by value and imports the SDK after materializing the package.
 Native Python dependencies, Torch, CUDA/ROCm, and DSL toolchains must already be
 installed in compatible driver/worker images. Adjacent `requirements.txt` is
 transported as evidence; workers do not install it. Driver-local dependency
-directories and arbitrary native site-packages are not transported. Ray Data
+directories and arbitrary native site-packages are not transported. Workers replace
+all inherited `PYTHONPATH` entries (including image-provided entries) with the
+transported source paths; install native dependencies in the worker interpreter's
+`site-packages`. Ray Data
 requires `ray[data]>=2.54,<2.57`, including its pandas/PyArrow dependencies.
 
 Automatic distribution requires the complete shape set. Explicit `shape_ids`

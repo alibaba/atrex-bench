@@ -282,6 +282,11 @@ shard reports are committed on the driver node and reused even if their worker r
 is lost. Candidate failures are not retried. The admitted GPU worker limit remains
 unchanged; a driver/registry loss fails the run instead of replaying successful work.
 
+![Ray Data execution architecture](docs/diagrams/ray-data-execution.png)
+
+See the [architecture and failure-path diagrams](docs/ray_data_architecture.md)
+for the bounded worker pool, result commits, retries and cleanup mapped to code.
+
 ## Repository Layout
 
 ```text

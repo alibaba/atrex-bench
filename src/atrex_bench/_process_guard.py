@@ -86,7 +86,15 @@ def main() -> None:
             break
     # Keep cleanup_write open until process exit; closing it here could let
     # the watchdog kill the supervisor before its successful status is saved.
-    os._exit(child.wait() & 255)
+    returncode = child.wait()
+    if returncode < 0:
+        # Die from the same signal so Popen callers retain negative returncodes
+        # and the evaluator's existing signal/OOM diagnostics remain usable.
+        signum = -returncode
+        if signum not in (signal.SIGKILL, signal.SIGSTOP):
+            signal.signal(signum, signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+    os._exit(returncode)
 
 
 if __name__ == "__main__":

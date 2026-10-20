@@ -250,8 +250,9 @@ class _ShardEvaluator:
             *[str(self.root / item) for item in bundle["python_dirs"]],
         ]
         sys.path[:0] = python_paths
-        # Only transported Python paths and the worker's image environment are
-        # valid here. The driver's per-job deps/PYTHONPATH paths are node-local.
+        # Replace all PYTHONPATH entries, including image-provided ones: Ray
+        # cannot distinguish them from inherited driver-local paths. Native
+        # dependencies must be installed in the worker interpreter's site-packages.
         os.environ["PYTHONPATH"] = os.pathsep.join(python_paths)
         self.config = {key: value for key, value in config.items() if key not in _DISTRIBUTION_KEYS}
         self.config.update({key: str(self.root / value) for key, value in bundle["paths"].items()})
@@ -383,8 +384,12 @@ def evaluate_ray_data(config):
         _check_ray_version(ray)
     except ValueError as error:
         raise AtrexConfigError(str(error)) from error
-    all_ids = sorted(json.loads((Path(config["reference_dir"]) / "shapes.json").read_text()))
-    select_shape_ids(all_ids, all_ids)
+    try:
+        all_ids = sorted(json.loads((Path(config["reference_dir"]) / "shapes.json").read_text()))
+        # Validate the complete set here; each dataset row selects its own subset.
+        all_ids = select_shape_ids(all_ids, all_ids)
+    except (OSError, ValueError, TypeError) as error:
+        raise AtrexConfigError(f"Invalid Ray shape set: {error}") from error
     size = config.get("ray_shapes_per_shard", 1)
     shards = [all_ids[index : index + size] for index in range(0, len(all_ids), size)]
     if not shards:
@@ -396,37 +401,44 @@ def evaluate_ray_data(config):
         or config.get("ray_namespace")
         or f"atrex-bench-{uuid.uuid4().hex}"
     )
-    ray.init(address="auto", namespace=namespace, log_to_driver=False)
     resources = config.get("ray_resources", {})
     placement = {"resources": resources}
     if config.get("ray_node_selector"):
         placement["label_selector"] = config["ray_node_selector"]
     registry = None
     actor_ids = []
-    data_context = ray.data.DataContext.get_current()
-    retry_context = {
-        key: getattr(data_context, key)
-        for key in ("actor_task_retry_on_errors", "retried_map_errors", "max_errored_blocks")
-        if hasattr(data_context, key)  # retried_map_errors was added in Ray 2.56.
-    }
-    # Only Ray system failures may replay a map task; never retry user exceptions
-    # or silently drop a failed shard under an inherited DataContext setting.
-    data_context.actor_task_retry_on_errors = False
-    if "retried_map_errors" in retry_context:
-        data_context.retried_map_errors = False
-    data_context.max_errored_blocks = 0
-    # The evaluator wheel may exist only in the driver's deps. Serialize the
-    # small adapter by value; its actors materialize the immutable Python
-    # evaluator snapshot before importing the local SDK.
-    already_registered = __name__ in ray.cloudpickle.list_registry_pickle_by_value()
-    if not already_registered:
-        ray.cloudpickle.register_pickle_by_value(sys.modules[__name__])
+    data_context = None
+    retry_context = {}
+    register_by_value = False
+    failure = None
     try:
+        try:
+            ray.init(address="auto", namespace=namespace, log_to_driver=False)
+            data_context = ray.data.DataContext.get_current()
+            retry_context = {
+                key: getattr(data_context, key)
+                for key in (
+                    "actor_task_retry_on_errors", "retried_map_errors", "max_errored_blocks"
+                )
+                if hasattr(data_context, key)  # retried_map_errors was added in Ray 2.56.
+            }
+            # Never retry user exceptions or silently drop failed shards under
+            # an inherited DataContext setting.
+            data_context.actor_task_retry_on_errors = False
+            if "retried_map_errors" in retry_context:
+                data_context.retried_map_errors = False
+            data_context.max_errored_blocks = 0
+            # The wheel may exist only on the driver. Ship the small adapter by
+            # value; actors materialize the Python snapshot before importing SDK.
+            register_by_value = __name__ not in ray.cloudpickle.list_registry_pickle_by_value()
+            if register_by_value:
+                ray.cloudpickle.register_pickle_by_value(sys.modules[__name__])
+        except Exception as error:
+            raise AtrexConfigError(f"Ray initialization failed: {error}") from error
         driver = _runtime_diagnostics(ray)
         from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
 
         registry = ray.remote(num_cpus=0, max_restarts=0)(_ActorRegistry).options(
-            name="atrex-bench-shards",
             scheduling_strategy=NodeAffinitySchedulingStrategy(driver["node_id"], soft=False),
         ).remote(max_retries)
         bundle = _snapshot_sources(config)
@@ -455,22 +467,36 @@ def evaluate_ray_data(config):
         merged = merge_evaluation_shards([json.loads(row["result_json"]) for row in results])
         executions = [json.loads(row["execution_json"]) for row in results]
         progress = ray.get(registry.progress.remote())
+    except BaseException as error:
+        failure = error
+        raise
     finally:
         try:
-            if registry is not None:
-                actor_ids = _drain_actors(ray, registry)
-        finally:
             try:
                 if registry is not None:
-                    _terminate_registry(ray, registry)
+                    actor_ids = _drain_actors(ray, registry)
             finally:
                 try:
-                    if not already_registered:
-                        ray.cloudpickle.unregister_pickle_by_value(sys.modules[__name__])
+                    if registry is not None:
+                        _terminate_registry(ray, registry)
                 finally:
-                    for key, value in retry_context.items():
-                        setattr(data_context, key, value)
-                    ray.shutdown()
+                    try:
+                        if (register_by_value
+                                and __name__ in ray.cloudpickle.list_registry_pickle_by_value()):
+                            ray.cloudpickle.unregister_pickle_by_value(sys.modules[__name__])
+                    finally:
+                        try:
+                            for key, value in retry_context.items():
+                                setattr(data_context, key, value)
+                        finally:
+                            ray.shutdown()
+        except Exception as cleanup_error:
+            if failure is None:
+                raise
+            # Preserve the primary failure, including on Python 3.10, while
+            # keeping a failed cleanup visible in the captured driver stderr.
+            print(f"[atrex-ray-cleanup] {type(cleanup_error).__name__}: {cleanup_error}",
+                  file=sys.stderr)
     merged["distribution"] = {
         "schema_version": RAY_DATA_DISTRIBUTION_SCHEMA_VERSION,
         "mode": "ray_data",
