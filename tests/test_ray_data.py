@@ -783,7 +783,8 @@ def _retry_fixture(tmp_path, monkeypatch):
     return config_for(reference, candidate, tmp_path / 'output', ray_shapes_per_shard=1)
 
 
-def test_only_ten_lost_workers_retry_in_twenty_shards(fake_ray, monkeypatch, tmp_path):
+@pytest.mark.parametrize('failures', [1, 3])
+def test_only_ten_lost_workers_retry_in_twenty_shards(fake_ray, monkeypatch, tmp_path, failures):
     from collections import Counter
 
     ray, _ = fake_ray
@@ -793,7 +794,7 @@ def test_only_ten_lost_workers_retry_in_twenty_shards(fake_ray, monkeypatch, tmp
     def run(config):
         sid = config['shape_ids'][0]
         calls[sid] += 1
-        if int(sid) < 10 and calls[sid] == 1:
+        if int(sid) < 10 and calls[sid] <= failures:
             raise ray.exceptions.RayActorError('injected worker loss')
         return {'shape_id': sid}
 
@@ -801,14 +802,16 @@ def test_only_ten_lost_workers_retry_in_twenty_shards(fake_ray, monkeypatch, tmp
     result = adapter.evaluate_ray_data(config)
     assert len(result['rows']) == 20
     assert set(row['shape_id'] for row in result['rows']) == set(map(str, range(20)))
-    assert sum(calls.values()) == 30
-    assert all(calls[str(i)] == (2 if i < 10 else 1) for i in range(20))
+    assert sum(calls.values()) == 20 + 10 * failures
+    assert all(calls[str(i)] == (failures + 1 if i < 10 else 1) for i in range(20))
     attempts = result['distribution']['shard_attempts']
-    assert sum(len(rows) for rows in attempts.values()) == 30
-    assert sum(row['status'] == 'worker_lost' for rows in attempts.values() for row in rows) == 10
+    assert sum(len(rows) for rows in attempts.values()) == 20 + 10 * failures
+    assert sum(row['status'] == 'worker_lost' for rows in attempts.values() for row in rows) == 10 * failures
     assert len(result['distribution']['worker_actor_ids']) == 2
     assert ray.data.last_options['num_gpus'] == 1
-    assert ray.data.last_options['max_task_retries'] == 1
+    assert ray.data.last_options['max_task_retries'] == 3
+    assert ray.data.last_options['max_restarts'] == 60
+    assert result['distribution']['max_shard_retries'] == 3
     assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
 
 
@@ -833,11 +836,12 @@ def test_committed_shards_survive_lost_worker_replies(fake_ray, monkeypatch, tmp
     assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
 
 
-@pytest.mark.parametrize('retries', [0, 1, 3])
+@pytest.mark.parametrize('retries', [None, 0, 1, 2, 3])
 def test_worker_retry_exhaustion_is_bounded_and_drains(fake_ray, monkeypatch, tmp_path, retries):
     ray, _ = fake_ray
     config = _retry_fixture(tmp_path, monkeypatch)
-    config['ray_max_shard_retries'] = retries
+    if retries is not None:
+        config['ray_max_shard_retries'] = retries
     calls = []
 
     def run(config):
@@ -847,7 +851,7 @@ def test_worker_retry_exhaustion_is_bounded_and_drains(fake_ray, monkeypatch, tm
     monkeypatch.setattr('atrex_bench.evaluate', run)
     with pytest.raises(ray.exceptions.RayActorError):
         adapter.evaluate_ray_data(config)
-    assert len(calls) == retries + 1
+    assert len(calls) == (3 if retries is None else retries) + 1
     assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
 
 
@@ -877,10 +881,12 @@ def test_application_error_is_not_retried_and_context_is_restored(fake_ray, monk
     assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
 
 
-def test_registry_bounds_retries_even_if_a_map_bundle_is_replayed():
-    registry = adapter._ActorRegistry(max_retries=1)
-    assert registry.begin('failed', {}) == {'attempt': 1}
-    assert registry.begin('failed', {}) == {'attempt': 2}
+@pytest.mark.parametrize('retries', [None, 0, 1, 2, 3])
+def test_registry_bounds_retries_even_if_a_map_bundle_is_replayed(retries):
+    registry = adapter._ActorRegistry() if retries is None else adapter._ActorRegistry(max_retries=retries)
+    limit = 3 if retries is None else retries
+    for attempt in range(1, limit + 2):
+        assert registry.begin('failed', {}) == {'attempt': attempt}
     with pytest.raises(RuntimeError, match='retry limit'):
         registry.begin('failed', {})
     registry.begin('done', {})

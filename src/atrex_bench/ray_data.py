@@ -53,7 +53,7 @@ def validate_distribution(config):
         value = config.get(key, 1)
         if type(value) is not int or value < 1:
             raise AtrexConfigError(f"{key} must be a positive integer")
-    retries = config.get("ray_max_shard_retries", 1)
+    retries = config.get("ray_max_shard_retries", 3)
     if type(retries) is not int or not 0 <= retries <= 3:
         raise AtrexConfigError("ray_max_shard_retries must be an integer from 0 to 3")
     resources = config.get("ray_resources", {})
@@ -149,7 +149,7 @@ def _snapshot_sources(config):
 class _ActorRegistry:
     """Driver-owned commits survive GPU worker loss, including lost result replies."""
 
-    def __init__(self, max_retries=1):
+    def __init__(self, max_retries=3):
         self.handles = {}
         self.max_retries = max_retries
         self.results = {}
@@ -390,7 +390,7 @@ def evaluate_ray_data(config):
     if not shards:
         raise AtrexConfigError("ray_data requires at least one shape")
     maximum = min(config.get("ray_max_workers", len(shards)), len(shards))
-    max_retries = config.get("ray_max_shard_retries", 1)
+    max_retries = config.get("ray_max_shard_retries", 3)
     namespace = (
         os.environ.get("AGATE_RAY_NAMESPACE")
         or config.get("ray_namespace")

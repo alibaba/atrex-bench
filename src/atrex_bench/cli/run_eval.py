@@ -4682,7 +4682,7 @@ def main() -> None:
     parser.add_argument("--ray-shapes-per-shard", type=int, default=None,
                         help="Original shapes per Ray work item (default 1)")
     parser.add_argument("--ray-max-shard-retries", type=int, default=None,
-                        help="Worker/node failure retries per shard (0-3; default 1)")
+                        help="Worker/node failure retries per shard (0-3; default 3)")
     parser.add_argument("--ray-namespace", default=None,
                         help="Standalone Ray namespace; gateway attempt namespace takes precedence")
     args = parser.parse_args()

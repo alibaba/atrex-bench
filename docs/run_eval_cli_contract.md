@@ -182,7 +182,7 @@ report = evaluate({
 | `distribution` | `local` | `local` or `ray_data`. |
 | `ray_max_workers` | shard count | Initial pool of one-GPU actors; an explicit positive integer caps it at the shard count. |
 | `ray_shapes_per_shard` | `1` | Positive number of consecutive original shape IDs per dataset row. |
-| `ray_max_shard_retries` | `1` | Worker/node failure retries per shard, integer 0–3. The CLI also accepts `--ray-max-shard-retries`. |
+| `ray_max_shard_retries` | `3` | Worker/node failure retries per shard, integer 0–3. The CLI also accepts `--ray-max-shard-retries`. |
 | `ray_resources` | `{}` | Ray custom resource requirements for GPU workers; positive numbers, excluding `CPU` and `GPU`. |
 | `ray_node_selector` | `{}` | Ray `label_selector` mapping for GPU workers; the zero-GPU registry stays on the driver node. |
 | `ray_namespace` | Generated | Optional standalone Ray namespace. Gateway `AGATE_RAY_NAMESPACE` overrides this field to isolate attempts. |
