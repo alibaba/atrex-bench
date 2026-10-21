@@ -144,3 +144,8 @@ activations and CPU scheduler controls. This policy still clones backing storage
 and preserves layout and aliases, but does not move tensors. Such a factory must
 select the process's intended GPU itself. The policy applies to forward inputs;
 model initialization retains the normal device handling. Unknown policies fail.
+
+For declared mutable state, original non-finite pool elements are accepted only
+when both executions preserve their exact input bytes. These unchanged elements
+are excluded from numerical comparison counts. New NaNs, changed NaN payloads
+and changed infinities fail; returned outputs still require finite values.
