@@ -116,3 +116,36 @@ must match `None` in both modes, including nested leaves.
 Benchmarks that omit `correctness_tolerances`, `correctness_min_cases`, and
 `scratch_inputs` retain the previous global tolerance, case-count, and input
 mutation behavior.
+
+## Defined output regions
+
+For native APIs with undefined padding, metadata may declare
+`benchmark_contract.output_mask_method` as the name of a public method on the
+trusted reference `Model`. The evaluator calls it with a clone of the pristine
+forward inputs before either implementation runs. It must return a nonempty
+mapping from output tensor paths (for example `output[1]` or `output.scales`) to
+boolean tensors with the full physical output shape and at least one true bit.
+Omitted output paths retain full comparison. Unknown paths and invalid masks
+fail correctness.
+
+The full output structure, shape and dtype are checked before selecting defined
+elements. Finiteness, tolerances and mismatch fractions then apply only to those
+elements. Input mutation checks are unchanged. The method is never called on
+the candidate and is outside forward and its performance timing; it must derive
+the defined region from the input contract, not from output values. Preserve the
+native output layout rather than returning a compacted tensor from `forward`.
+
+## Input device placement
+
+`benchmark_contract.input_device_policy` defaults to `"move"`: factory tensors
+are cloned and moved to the requested evaluation device. Set `"preserve"` for
+factories that already construct the exact runtime placement, including GPU
+activations and CPU scheduler controls. This policy still clones backing storage
+and preserves layout and aliases, but does not move tensors. Such a factory must
+select the process's intended GPU itself. The policy applies to forward inputs;
+model initialization retains the normal device handling. Unknown policies fail.
+
+For declared mutable state, original non-finite pool elements are accepted only
+when both executions preserve their exact input bytes. These unchanged elements
+are excluded from numerical comparison counts. New NaNs, changed NaN payloads
+and changed infinities fail; returned outputs still require finite values.

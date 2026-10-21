@@ -83,6 +83,7 @@ class CorrectnessCase:
     outputs: list[OutputDiff] = field(default_factory=list)
     mutated_inputs: list[OutputDiff] = field(default_factory=list)
     unexpected_mutations: list[OutputDiff] = field(default_factory=list)
+    defined_outputs: dict[str, OutputDiff] = field(default_factory=dict)
     error: str | None = None
 
 
@@ -241,10 +242,10 @@ def _validated_global_tolerance(name: str, raw_value: object) -> float:
     return value
 
 
-def _comparison_chunks(reference, candidate):
+def _comparison_chunks(reference, candidate, *extra):
     """Yield bounded matching views, including noncontiguous logical tensors."""
     if reference.numel() <= _COMPARISON_CHUNK_ELEMENTS:
-        yield reference, candidate
+        yield reference, candidate, *extra
         return
     axis = max(range(reference.ndim), key=lambda index: reference.shape[index])
     size = reference.shape[axis]
@@ -253,6 +254,7 @@ def _comparison_chunks(reference, candidate):
         yield from _comparison_chunks(
             reference.narrow(axis, start, length),
             candidate.narrow(axis, start, length),
+            *(value.narrow(axis, start, length) for value in extra),
         )
 
 
@@ -268,6 +270,8 @@ def _compare_output_tensors(
     metadata_correctness: bool = False,
     max_mismatch_fraction: float = 0.0,
     max_rel_l2_bound: float | None = None,
+    defined_mask: torch.Tensor | None = None,
+    mutation_before: torch.Tensor | None = None,
 ) -> OutputDiff:
     """Compare a pair of output tensors and return the per-output diff record."""
     if strict_dtype and reference_tensor.dtype != candidate_tensor.dtype:
@@ -287,6 +291,24 @@ def _compare_output_tensors(
             ),
         )
 
+    if defined_mask is not None:
+        if (
+            not isinstance(defined_mask, torch.Tensor)
+            or defined_mask.dtype != torch.bool
+            or defined_mask.shape != reference_tensor.shape
+            or not bool(defined_mask.any().item())
+        ):
+            return OutputDiff(
+                name=name,
+                passed=False,
+                error="Output mask must be a nonempty bool mask of the full output shape",
+            )
+        # Validate the full physical ABI before selecting defined elements.
+        if reference_tensor.dtype != candidate_tensor.dtype:
+            return OutputDiff(name=name, passed=False, error="Masked output dtype mismatch")
+        reference_tensor = reference_tensor[defined_mask.to(reference_tensor.device)]
+        candidate_tensor = candidate_tensor[defined_mask.to(candidate_tensor.device)]
+
     reference_is_discrete = not (
         torch.is_floating_point(reference_tensor) or torch.is_complex(reference_tensor)
     )
@@ -305,14 +327,48 @@ def _compare_output_tensors(
         )
 
     error: str | None = None
+    compared_elements = reference_tensor.numel()
     if torch.is_floating_point(reference_tensor) or torch.is_floating_point(candidate_tensor):
         ref_is_finite = cand_is_finite = True
         reference_norm = candidate_norm = diff_l2 = 0.0
         max_elementwise_abs_diff = max_elementwise_rel_diff = 0.0
         mismatched = 0
-        for ref_chunk, cand_chunk in _comparison_chunks(reference_tensor, candidate_tensor):
+        baseline = (
+            (mutation_before,)
+            if (
+                isinstance(mutation_before, torch.Tensor)
+                and mutation_before.shape == reference_tensor.shape
+                and mutation_before.dtype == reference_tensor.dtype == candidate_tensor.dtype
+            )
+            else ()
+        )
+        for chunks in _comparison_chunks(reference_tensor, candidate_tensor, *baseline):
+            ref_chunk, cand_chunk = chunks[:2]
             reference_float = ref_chunk.detach().to(torch.float64)
             candidate_float = cand_chunk.detach().to(torch.float64)
+            if baseline:
+                before_chunk = chunks[2]
+                nonfinite = ~torch.isfinite(reference_float) | ~torch.isfinite(candidate_float)
+                if bool(nonfinite.any().item()):
+                    # A state pool may contain untouched NaN/Inf padding. It is
+                    # accepted only when BOTH executions preserve its exact bytes.
+                    def bits(value):
+                        return (
+                            value.detach()
+                            .contiguous()
+                            .reshape(-1)
+                            .view(torch.uint8)
+                            .reshape(value.numel(), value.element_size())
+                        )
+
+                    original = bits(before_chunk)
+                    unchanged = (
+                        (bits(ref_chunk) == original).all(1) & (bits(cand_chunk) == original).all(1)
+                    ).reshape(ref_chunk.shape)
+                    ignored = nonfinite & unchanged
+                    compared_elements -= int(ignored.sum().item())
+                    reference_float = reference_float.masked_fill(ignored, 0)
+                    candidate_float = candidate_float.masked_fill(ignored, 0)
             ref_is_finite &= bool(torch.isfinite(reference_float).all().item())
             cand_is_finite &= bool(torch.isfinite(candidate_float).all().item())
             if not ref_is_finite or not cand_is_finite:
@@ -326,9 +382,7 @@ def _compare_output_tensors(
             abs_diff = (reference_float - candidate_float).abs()
             diff_l2 = math.hypot(diff_l2, torch.linalg.vector_norm(abs_diff).item())
             if abs_diff.numel():
-                max_elementwise_abs_diff = max(
-                    max_elementwise_abs_diff, abs_diff.max().item()
-                )
+                max_elementwise_abs_diff = max(max_elementwise_abs_diff, abs_diff.max().item())
                 denominator = reference_float.abs().clamp_min(max(atol, 1e-12))
                 max_elementwise_rel_diff = max(
                     max_elementwise_rel_diff,
@@ -336,9 +390,7 @@ def _compare_output_tensors(
                 )
             # Preserve the historical torch.allclose(reference, candidate)
             # argument direction: the relative term scales with candidate.
-            mismatched += int(
-                (abs_diff > atol + rtol * candidate_float.abs()).sum().item()
-            )
+            mismatched += int((abs_diff > atol + rtol * candidate_float.abs()).sum().item())
         if not ref_is_finite or not cand_is_finite:
             return OutputDiff(
                 name=name,
@@ -355,12 +407,8 @@ def _compare_output_tensors(
         candidate_is_zero = reference_norm > 0.0 and candidate_norm == 0.0
         relative_l2 = diff_l2 / max(reference_norm, 1e-12)
         fraction = Fraction(str(max_mismatch_fraction))
-        allowed = reference_tensor.numel() * fraction.numerator // fraction.denominator
-        passed = (
-            relative_l2 <= max_rel_l2
-            if max_rel_l2 is not None
-            else mismatched <= allowed
-        )
+        allowed = compared_elements * fraction.numerator // fraction.denominator
+        passed = relative_l2 <= max_rel_l2 if max_rel_l2 is not None else mismatched <= allowed
         if max_rel_l2_bound is not None:
             # Metadata max_rel_l2 is conjunctive with the elementwise rule,
             # unlike the legacy CLI/environment L2-only mode above.
@@ -388,7 +436,7 @@ def _compare_output_tensors(
         relative_l2=relative_l2,
         error=error,
         mismatched_elements=mismatched,
-        total_elements=reference_tensor.numel(),
+        total_elements=compared_elements,
         allowed_mismatched_elements=allowed,
         tolerance={
             "atol": atol,
@@ -421,6 +469,9 @@ def _compare_value_trees(
     output_tolerances=None,
     tolerance_name=None,
     matched_tolerance_paths=None,
+    output_masks=None,
+    matched_mask_paths=None,
+    mutation_before=None,
 ):
     """Compare return values, with exact types for explicit mutation contracts."""
     try:
@@ -444,7 +495,12 @@ def _compare_value_trees(
                 strict_types=strict_types,
                 output_tolerances=output_tolerances,
                 tolerance_name=f"{logical_name}.{key}",
+                mutation_before=mutation_before.get(key)
+                if isinstance(mutation_before, dict)
+                else None,
                 matched_tolerance_paths=matched_tolerance_paths,
+                output_masks=output_masks,
+                matched_mask_paths=matched_mask_paths,
             )
         ]
     if isinstance(reference, (list, tuple)):
@@ -461,7 +517,14 @@ def _compare_value_trees(
                 strict_types=strict_types,
                 output_tolerances=output_tolerances,
                 tolerance_name=f"{logical_name}[{index}]",
+                mutation_before=(
+                    mutation_before[index]
+                    if isinstance(mutation_before, (list, tuple)) and index < len(mutation_before)
+                    else None
+                ),
                 matched_tolerance_paths=matched_tolerance_paths,
+                output_masks=output_masks,
+                matched_mask_paths=matched_mask_paths,
             )
         ]
     if reference is None:
@@ -470,6 +533,9 @@ def _compare_value_trees(
     # list/tuple interoperability for benchmarks without an explicit contract.
     reference_tensor = flatten_outputs(reference)[0][1]
     candidate_tensor = flatten_outputs(candidate)[0][1]
+    masks = output_masks or {}
+    if logical_name in masks and matched_mask_paths is not None:
+        matched_mask_paths.add(logical_name)
     policies = output_tolerances or {}
     tolerance = policies.get(logical_name)
     is_output_path = (
@@ -490,6 +556,8 @@ def _compare_value_trees(
             rtol=tolerance.rtol if tolerance is not None else rtol,
             max_rel_l2=max_rel_l2,
             strict_dtype=strict_types,
+            defined_mask=masks.get(logical_name),
+            mutation_before=mutation_before,
             metadata_correctness=bool(policies),
             max_mismatch_fraction=(
                 tolerance.max_mismatch_fraction if tolerance is not None else 0.0
@@ -724,6 +792,14 @@ def check_correctness(
             # Per-output metadata is authoritative and must not be replaced by
             # a legacy process-wide relative-L2 threshold.
             effective_max_rel_l2 = None
+        mask_method = contract.get("output_mask_method")
+        if mask_method is not None and (
+            not isinstance(mask_method, str)
+            or not mask_method.isidentifier()
+            or mask_method.startswith("_")
+            or not callable(getattr(loaded_models.reference_model, mask_method, None))
+        ):
+            raise ValueError("output_mask_method must name a public reference Model method")
         signature = inspect.signature(loaded_models.reference_model.forward)
     except Exception:
         return CorrectnessShapeResult(
@@ -792,6 +868,25 @@ def check_correctness(
                 raise ValueError(
                     f"Unknown scratch input names: {set(scratch_inputs) - original_named.keys()}"
                 )
+            output_masks = {}
+            if mask_method is not None:
+                # Only trusted reference code receives pristine input clones.
+                # Compute masks before either forward; candidate output cannot select its domain.
+                mask_inputs = clone_model_inputs(inputs)
+                with torch.inference_mode():
+                    output_masks = getattr(loaded_models.reference_model, mask_method)(
+                        *mask_inputs.args, **mask_inputs.kwargs
+                    )
+                if not isinstance(output_masks, dict) or not output_masks:
+                    raise ValueError("Output masks must be a nonempty path-to-bool-tensor mapping")
+                for path, mask in output_masks.items():
+                    if (
+                        not isinstance(path, str)
+                        or not path.startswith("output")
+                        or not isinstance(mask, torch.Tensor)
+                        or mask.dtype != torch.bool
+                    ):
+                        raise ValueError("Invalid output mask path or dtype")
             with torch.inference_mode():
                 # Reference is the golden implementation; we trust it and
                 # never time it out. The candidate is the AI-generated code
@@ -849,6 +944,7 @@ def check_correctness(
                 break
 
             matched_tolerance_paths: set[str] = set()
+            matched_mask_paths: set[str] = set()
             output_diffs = _compare_value_trees(
                 reference_output,
                 candidate_output,
@@ -859,7 +955,15 @@ def check_correctness(
                 strict_types=strict_types,
                 output_tolerances=output_tolerances,
                 matched_tolerance_paths=matched_tolerance_paths,
+                output_masks=output_masks,
+                matched_mask_paths=matched_mask_paths,
             )
+            for path in output_masks.keys() - matched_mask_paths:
+                output_diffs.append(
+                    OutputDiff(
+                        name=path, passed=False, error="Output mask path did not match a tensor"
+                    )
+                )
             output_diffs = [
                 replace(diff, name=_flatten_output_name(diff.name)) for diff in output_diffs
             ]
@@ -874,6 +978,7 @@ def check_correctness(
                             reference_named[key],
                             candidate_named[key],
                             name=f"input.{key}",
+                            mutation_before=before,
                             atol=atol,
                             rtol=rtol,
                             max_rel_l2=effective_max_rel_l2,
@@ -912,6 +1017,12 @@ def check_correctness(
                 CorrectnessCase(
                     input_artifact=artifact,
                     outputs=output_diffs,
+                    defined_outputs={
+                        path: diff
+                        for path in output_masks
+                        for diff in output_diffs
+                        if diff.name == _flatten_output_name(path)
+                    },
                     mutated_inputs=mutation_diffs,
                     unexpected_mutations=unexpected_diffs,
                 )
