@@ -345,15 +345,11 @@ def load_shape_call_inputs(
     so callers drive forward with ``model(**inputs.kwargs)``.
     """
     if not callable(getattr(input_module, "_make_inputs", None)):
-        raise AttributeError(
-            "Input module does not define callable '_make_inputs(**kwargs)'"
-        )
+        raise AttributeError("Input module does not define callable '_make_inputs(**kwargs)'")
     raw = input_module._make_inputs(**shape.input_kwargs)
     if not isinstance(raw, dict):
-        raise TypeError(
-            f"_make_inputs must return dict[str, Tensor], got {type(raw).__name__}"
-        )
-    return prepare_model_inputs(raw, device)
+        raise TypeError(f"_make_inputs must return dict[str, Tensor], got {type(raw).__name__}")
+    return _prepare_call_inputs(input_module, raw, device)
 
 
 def _shape_description_from_metadata(op_dir: Path, shape_id: str) -> str:
@@ -626,9 +622,24 @@ def prepare_model_inputs(raw_inputs: Any, device: torch.device) -> ModelInputs:
     return move_to_device(clone_model_inputs(normalized_inputs), device)
 
 
+def _prepare_call_inputs(module: ModuleType, raw: Any, device: torch.device) -> ModelInputs:
+    """Honor trusted benchmark factories that own mixed host/device placement."""
+    source_file = getattr(module, "__file__", None)
+    metadata_path = Path(source_file).with_name("metadata.json") if source_file else None
+    policy = "move"
+    if metadata_path is not None and metadata_path.is_file():
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        policy = (metadata.get("benchmark_contract") or {}).get("input_device_policy", "move")
+    if policy == "preserve":
+        return clone_model_inputs(normalize_model_inputs(raw))
+    if policy != "move":
+        raise ValueError("input_device_policy must be 'move' or 'preserve'")
+    return prepare_model_inputs(raw, device)
+
+
 def load_model_inputs(module: ModuleType, device: torch.device) -> ModelInputs:
     """Load one input case from get_inputs()."""
-    return prepare_model_inputs(module.get_inputs(), device)
+    return _prepare_call_inputs(module, module.get_inputs(), device)
 
 
 def load_reference_inputs(module: ModuleType, device: torch.device) -> ModelInputs:
