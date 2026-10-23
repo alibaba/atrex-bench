@@ -2342,7 +2342,9 @@ def test_acquisition_failure_does_not_launch_worker(
     monkeypatch.setattr(
         run_eval_module,
         "_build_environment",
-        lambda *, clock_locked: {"clock_locked": clock_locked},
+        lambda *, clock_locked, collect_device=True: {
+            "clock_locked": clock_locked, "device_metadata_collected": collect_device
+        },
     )
     reference_dir = _build_reference_dir(tmp_path / "reference", name="acquire_fail")
     timestamp = "20260801-000100"
@@ -2362,6 +2364,7 @@ def test_acquisition_failure_does_not_launch_worker(
 
     assert worker_calls == []
     assert payload["environment"]["clock_locked"] is False
+    assert payload["environment"]["device_metadata_collected"] is False
     assert payload["environment"]["clock_lock"]["verified"] is False
     assert "not idle" in payload["error"]
     artifact_dir = tmp_path / timestamp / "acquire_fail"

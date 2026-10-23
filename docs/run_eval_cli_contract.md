@@ -298,6 +298,19 @@ second to clean up its separately grouped shape worker before SIGKILL, followed
 by bounded process/pipe cleanup. This is not a sandbox: descendants that explicitly
 detach into another session are outside the original process group.
 
+### Environment Metadata
+
+The top-level candidate and Torch compile supervisors collect only CPU-side
+environment metadata when preparing fallback reports. They do not query devices,
+drivers, or PTL state: these queries can initialize an extra CUDA context and
+interfere with profiler counters in nested workers, including PPU ACU captures.
+The provisional `gpu_name`, `gpu_arch`, `accelerator_backend`, `driver_version`,
+and `PTL_STATE` fields remain `null` if no worker report is available. Package and
+runtime versions, Python version, and external clock-lock markers remain available.
+When a worker writes a report, its complete environment metadata is preserved,
+including on failure. Managed clock locking still performs its existing device
+identity and clock checks.
+
 ## 5. Advanced Performance Options
 
 | Option | Type | Default | Applies when |
