@@ -1,0 +1,33 @@
+digraph failures {
+  graph [rankdir=TB, bgcolor="white", pad=0.3, nodesep=0.35, ranksep=0.55,
+         fontname="Helvetica", fontsize=18, label="Shard outcomes and driver cleanup", labelloc=t];
+  node [shape=box, style="rounded,filled", fillcolor="#edf4fb", color="#446683",
+        fontname="Helvetica", fontsize=13, margin="0.15,0.10"];
+  edge [fontname="Helvetica", fontsize=11, color="#536577"];
+  running [label="Shard starts\nregistry.begin records attempt"];
+  lost [label="Ray worker / node failure\nRay system retry", fillcolor="#fff3d8"];
+  retry [label="Uncommitted shard: retry within limit\nDefault: 3 retries / 4 total attempts\nRestart waits 8s cleanup grace; K unchanged", fillcolor="#fff3d8"];
+  committed [label="Committed report\nSuccess OR normal candidate-stage failure\nLost reply replay uses cache: no harness rerun", fillcolor="#e7f4ed"];
+  merge [label="Collect all N reports + validate\nMissing / duplicate / incompatible → fail run"];
+  fail [label="Fail distributed run\nRaised user exception; retries exhausted;\ndriver / registry lost; invalid merged evidence", fillcolor="#fceceb"];
+  cleanup [label="Driver cleanup (finally)\nDrain owned actors; terminate registry;\nrestore globals; disconnect", fillcolor="#f3edf8"];
+  primary [label="Re-raise primary failure", fillcolor="#fceceb"];
+  result [label="Return complete report\nNormal candidate failures retain failed verdict", fillcolor="#e7f4ed"];
+  error [label="Cleanup timeout / error\nExisting failure: preserve it + log cleanup error\nOtherwise: raise cleanup error; no success report", fillcolor="#fceceb"];
+  hard [label="Hard driver stop cannot run finally\nActor lifetime guards still clean descendants\nCaller verifies terminal actors/tasks + 8s grace", fillcolor="#f3edf8"];
+  running -> committed [label="compile / correctness / performance report"];
+  running -> lost [label="worker disappears"];
+  lost -> committed [label="already committed"];
+  lost -> retry [label="not committed; budget remains"];
+  retry -> running [label="next attempt", constraint=false];
+  lost -> fail [label="limit exhausted"];
+  running -> fail [label="raised user exception", style=dashed];
+  committed -> merge;
+  merge -> cleanup [label="complete"];
+  merge -> fail [label="invalid"];
+  fail -> cleanup [label="driver still alive"];
+  cleanup -> primary [label="cleanup passed; primary error exists"];
+  cleanup -> result [label="cleanup passed; no primary error"];
+  cleanup -> error [label="cleanup failed"];
+  fail -> hard [style=dashed, label="driver gone"];
+}

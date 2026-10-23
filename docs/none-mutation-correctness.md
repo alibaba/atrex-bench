@@ -33,6 +33,71 @@ requires `x` to remain immutable. Declared mutable inputs are compared element b
 element over their logical views; declaring an alias does not certify bytes
 outside the union of those views.
 
+Inputs used only as disposable workspace can be excluded from semantic output
+comparison with `scratch_inputs`:
+
+```json
+{"benchmark_contract": {"scratch_inputs": ["workspace_buffer"]}}
+```
+
+## Per-output policies
+
+An operator may own elementwise tolerances for individual return values and
+declared mutations:
+
+```json
+{
+  "benchmark_contract": {
+    "correctness_tolerances": {
+      "default": {"atol": 0.01, "rtol": 0.05, "max_mismatch_fraction": 0.0},
+      "mutated_inputs.out": {
+        "atol": 0.01,
+        "rtol": 0.05,
+        "max_mismatch_fraction": 0.001,
+        "max_rel_l2": 0.01
+      }
+    },
+    "correctness_min_cases": 6
+  }
+}
+```
+
+`default` applies only to floating return values under `output` without a
+path-specific policy. It does not apply to declared mutations; each mutation
+that needs a metadata-owned policy must use an explicit `mutated_inputs.<key>`
+path. The remaining keys must match a value actually compared; stale or
+misspelled paths fail evaluation. Every policy requires `atol` and `rtol`; omitted
+`max_mismatch_fraction` means zero and omitted `max_rel_l2` means no additional
+L2 bound. Fractions use units of one: **0.001 means 0.1%, not 0.001%**.
+
+For each tensor the elementwise condition preserves the historical
+`torch.allclose(reference, candidate)` direction:
+
+```
+bad = abs(candidate - reference) > atol + rtol * abs(candidate)
+sum(bad) <= floor(max_mismatch_fraction * tensor.numel())
+```
+
+The allowed count uses exact decimal-to-rational arithmetic, without rounding
+small tensors up to one permitted mismatch. Every tensor must pass; elements
+are not pooled across outputs or cases. With `max_rel_l2`, also require
+`norm(candidate-reference)/max(norm(reference), 1e-12) <= max_rel_l2`. A zero
+reference norm requires exact zero error for this additional bound. NaN/Inf are
+rejected before either metric. When metadata owns correctness, integer and
+boolean reference tensors remain on the exact-comparison path regardless of the
+floating policy. A floating-point or complex candidate for such a reference is
+rejected; compatible discrete candidate tensors are compared exactly. This
+metadata-mode rule is intentionally directional: a floating reference retains
+the existing tolerant comparison behavior for an integer candidate.
+
+Receipts include each tensor's effective tolerance, total element count,
+mismatched count and allowed count, as well as the existing error metrics. The
+receipt `mode` distinguishes exact comparison, elementwise comparison,
+elementwise comparison with an L2 conjunct, and the legacy relative-L2 mode.
+When metadata owns tolerances, legacy CLI/environment relative-L2 settings cannot
+replace them. The legacy global L2-only mode is otherwise unchanged.
+`correctness_min_cases` remains a floor on the CLI-requested case count.
+
 ## Scope and compatibility
 
 CUDA Graph replay's separate output-only checker has not been extended to
@@ -47,3 +112,7 @@ tuple/list, numeric scalar and tensor dtype comparison behavior. Explicit
 mutation contracts require exact container/scalar types and tensor dtypes;
 floating-point values still use the configured numerical tolerances. `None`
 must match `None` in both modes, including nested leaves.
+
+Benchmarks that omit `correctness_tolerances`, `correctness_min_cases`, and
+`scratch_inputs` retain the previous global tolerance, case-count, and input
+mutation behavior.

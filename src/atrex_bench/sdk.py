@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import BinaryIO
 
 _PATH_CONFIG_KEYS = frozenset(
-    {"input", "reference_dir", "output", "checkpoint_dir"}
+    {"input", "baseline_input", "reference_dir", "output", "checkpoint_dir"}
 )
 _REFERENCE_FILENAMES = (
     "reference.py",
@@ -25,8 +25,11 @@ _REFERENCE_FILENAMES = (
     "metadata.json",
 )
 _EVAL_MODE_CANDIDATE = "candidate"
+_EVAL_MODE_ABBA = "abba"
 _EVAL_MODE_TORCH_COMPILE = "torch_compile_reference"
-_EVAL_MODES = frozenset({_EVAL_MODE_CANDIDATE, _EVAL_MODE_TORCH_COMPILE})
+_EVAL_MODES = frozenset(
+    {_EVAL_MODE_ABBA, _EVAL_MODE_CANDIDATE, _EVAL_MODE_TORCH_COMPILE}
+)
 _SDK_PROCESS_SHUTDOWN_TIMEOUT_S = 5.0
 _SDK_STDERR_TAIL_LINES = 50
 _SDK_STDERR_CHUNK_BYTES = 64 * 1024
@@ -87,7 +90,12 @@ def _normalize_config(config: Mapping[str, object]) -> dict[str, object]:
 
 
 def _validate_launch_paths(config: Mapping[str, object]) -> None:
-    eval_mode = config.get("eval_mode", _EVAL_MODE_CANDIDATE)
+    default_eval_mode = (
+        _EVAL_MODE_ABBA
+        if config.get("baseline_input") is not None
+        else _EVAL_MODE_CANDIDATE
+    )
+    eval_mode = config.get("eval_mode", default_eval_mode)
     if not isinstance(eval_mode, str) or eval_mode not in _EVAL_MODES:
         allowed = ", ".join(sorted(_EVAL_MODES))
         raise AtrexConfigError(f"eval_mode must be one of: {allowed}")
@@ -129,18 +137,36 @@ def _validate_launch_paths(config: Mapping[str, object]) -> None:
         )
 
     input_path = _optional_path(config, "input")
+    baseline_path = _optional_path(config, "baseline_input")
     if eval_mode == _EVAL_MODE_TORCH_COMPILE:
         if input_path is not None:
             raise AtrexConfigError(
                 "input cannot be set for eval_mode=torch_compile_reference"
             )
+        if baseline_path is not None:
+            raise AtrexConfigError(
+                "baseline_input cannot be set for eval_mode=torch_compile_reference"
+            )
         return
     if input_path is None:
-        raise AtrexConfigError("input is required for eval_mode=candidate")
-    if not input_path.is_file():
-        raise AtrexConfigError(f"input does not exist: {input_path}")
-    if input_path.suffix != ".py":
-        raise AtrexConfigError(f"input must be a Python file: {input_path}")
+        raise AtrexConfigError(f"input is required for eval_mode={eval_mode}")
+    _validate_candidate_file(input_path, "input")
+    if eval_mode == _EVAL_MODE_ABBA:
+        if baseline_path is None:
+            raise AtrexConfigError("baseline_input is required for eval_mode=abba")
+        _validate_candidate_file(baseline_path, "baseline_input")
+        validation_mode = config.get("validation_mode", "full")
+        if validation_mode != "full":
+            raise AtrexConfigError("eval_mode=abba requires validation_mode=full")
+    elif baseline_path is not None:
+        raise AtrexConfigError("baseline_input requires eval_mode=abba")
+
+
+def _validate_candidate_file(path: Path, name: str) -> None:
+    if not path.is_file():
+        raise AtrexConfigError(f"{name} does not exist: {path}")
+    if path.suffix != ".py":
+        raise AtrexConfigError(f"{name} must be a Python file: {path}")
 
 
 def _required_path(config: Mapping[str, object], name: str) -> Path:

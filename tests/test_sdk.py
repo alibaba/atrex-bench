@@ -86,7 +86,7 @@ def test_evaluate_keeps_relative_checkpoint_semantics(
     assert evaluate(config) is expected
 
 
-@pytest.mark.parametrize("eval_mode", ["candidate", "torch_compile_reference"])
+@pytest.mark.parametrize("eval_mode", ["candidate", "abba", "torch_compile_reference"])
 def test_evaluate_resolves_launch_paths_before_starting_worker(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, eval_mode: str,
 ) -> None:
@@ -99,6 +99,13 @@ def test_evaluate_resolves_launch_paths_before_starting_worker(
     )
     if eval_mode == "torch_compile_reference":
         config.pop("input")
+    elif eval_mode == "abba":
+        (tmp_path / "baseline.py").write_text(
+            "class Model:\n    pass\n",
+            encoding="utf-8",
+        )
+        config["baseline_input"] = "baseline.py"
+        config["validation_mode"] = "full"
     original = dict(config)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(sdk, "_run_evaluation_process", lambda normalized: normalized)
@@ -106,7 +113,7 @@ def test_evaluate_resolves_launch_paths_before_starting_worker(
     normalized = evaluate(config)
 
     assert config == original
-    for key in ("input", "reference_dir", "output"):
+    for key in ("input", "baseline_input", "reference_dir", "output"):
         if key in config:
             assert normalized[key] == str((tmp_path / config[key]).resolve())
     assert normalized["checkpoint_dir"] == "checkpoints"
@@ -138,6 +145,7 @@ def test_evaluate_rejects_unwritable_output_parent(
             lambda config: config.update(eval_mode="torch_compile_reference", input="x.py"),
             "input cannot be set",
         ),
+        (lambda config: config.update(eval_mode="abba"), "baseline_input is required"),
         (lambda config: config.update(reference_dir="missing"), "reference_dir"),
         (lambda config: config.update(output=""), "output must be a non-empty path"),
         (lambda config: config.update(extra=object()), "JSON-compatible"),
@@ -155,6 +163,25 @@ def test_evaluate_rejects_invalid_launch_config(
 
     with pytest.raises(AtrexConfigError, match=message):
         evaluate(config)
+
+
+def test_evaluate_infers_abba_mode_from_baseline_input(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from atrex_bench import evaluate, sdk
+
+    config = _valid_sdk_config(tmp_path)
+    config.pop("eval_mode")
+    baseline_path = tmp_path / "baseline.py"
+    baseline_path.write_text("class Model:\n    pass\n", encoding="utf-8")
+    config["baseline_input"] = baseline_path
+    config["validation_mode"] = "full"
+    monkeypatch.setattr(sdk, "_run_evaluation_process", lambda normalized: normalized)
+
+    normalized = evaluate(config)
+
+    assert normalized["baseline_input"] == str(baseline_path)
 
 
 class _FakeProcess:

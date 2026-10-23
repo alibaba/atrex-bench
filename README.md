@@ -224,6 +224,69 @@ Measure the `torch.compile` baseline instead of a candidate:
 python scripts/run_eval.py --torch-compile --reference-dir data/attention_forward --output results/torch_compile
 ```
 
+Compare a candidate (B) with a baseline (A) using a counterbalanced A-B-B-A
+schedule in one evaluator invocation:
+
+```bash
+python scripts/run_eval.py \
+  --baseline-input path/to/baseline_kernel.py \
+  --input path/to/candidate_kernel.py \
+  --reference-dir data/attention_forward \
+  --output results/attention_forward_abba
+```
+
+Each of the four runs performs the full compile, correctness, and performance
+pipeline in an isolated worker. The top-level `eval_result.json` reports the
+per-shape and aggregate candidate speedup over the baseline. With managed clock
+locking, one lock and monitoring session covers the complete A-B-B-A sequence.
+
+To evaluate an explicit shape subset, add `--shape-ids 0,2` or
+`--shape-ids @ids.json` (a JSON array of original shape IDs). The SDK config field
+is `shape_ids`. Selection keeps the full reference bundle and the same RNG
+seeds, tolerances, and timing settings as a serial run. Candidate, Torch compile,
+and ABBA modes support it. Results mark the selected IDs and partial coverage in
+`shape_selection`.
+
+Run disjoint shards on independent GPUs, then merge their result dictionaries
+or JSON paths with `atrex_bench.merge_evaluation_shards(shards, output="merged.json")`.
+Merging requires complete coverage and matching input/evaluator hashes,
+settings, hardware, toolchain, and seeds. See the
+[shape shard contract and Gateway examples](docs/run_eval_cli_contract.md#explicit-shape-shards-and-offline-merging)
+for `agate eval --shape-shards` and manual subset usage.
+
+Inside an existing Ray cluster, Atrex-Bench can split the complete shape set
+and merge the report automatically:
+
+```bash
+python scripts/run_eval.py --distribution ray_data --ray-max-workers 4 \
+  --ray-shapes-per-shard 1 --input candidate.py --reference-dir data/attention_forward \
+  --output results/distributed
+```
+
+The same options work in `evaluate(config)`. The CPU driver snapshots the full
+reference and evaluator sources. The Ray Data pool defaults to one GPU worker per
+shard; an explicit positive worker limit caps that count. Each actor reserves one
+GPU and runs the ordinary
+evaluator in fresh subprocesses. The report retains driver placement and per-shard
+actor/node IDs, interpreter, GPU assignment, and execution times so callers can
+verify worker overlap instead of inferring it from the configured maximum. These
+times cover shard evaluations, not individual CUDA kernels. Node-local driver
+versions are retained per shard; the merged report uses `driver_version: null`
+because its work spans independently managed nodes.
+GPU model/architecture and software runtime must still match. Install
+`atrex-bench[ray]` with matching native dependencies in the driver and worker
+images. See the [Ray Data runtime and cleanup contract](docs/run_eval_cli_contract.md#automatic-ray-data-distribution)
+for file transport, clock locking, ABBA, and lifecycle requirements.
+Worker/node failures retry only the affected shard (up to three retries by default, four total attempts). Successful
+shard reports are committed on the driver node and reused even if their worker reply
+is lost. Candidate failures are not retried. The admitted GPU worker limit remains
+unchanged; a driver/registry loss fails the run instead of replaying successful work.
+
+![Ray Data execution architecture](docs/diagrams/ray-data-execution.png)
+
+See the [architecture and failure-path diagrams](docs/ray_data_architecture.md)
+for the bounded worker pool, result commits, retries and cleanup mapped to code.
+
 ## Repository Layout
 
 ```text

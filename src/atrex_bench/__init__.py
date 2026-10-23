@@ -6,6 +6,7 @@ from atrex_bench.sdk import (
     AtrexSDKError,
     evaluate,
 )
+from atrex_bench.shards import SHAPE_SHARD_SCHEMA_VERSION, merge_evaluation_shards
 
 __version__ = "0.1.0"
 
@@ -14,4 +15,6 @@ __all__ = [
     "AtrexEvaluationError",
     "AtrexSDKError",
     "evaluate",
+    "merge_evaluation_shards",
+    "SHAPE_SHARD_SCHEMA_VERSION",
 ]
