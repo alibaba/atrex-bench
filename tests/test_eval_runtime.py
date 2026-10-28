@@ -125,7 +125,7 @@ def test_build_environment_reports_rocm_backend(monkeypatch) -> None:
     )
     monkeypatch.setattr(run_eval_module, "get_accelerator_backend", lambda: "rocm")
 
-    environment = run_eval_module._build_environment(clock_locked=True)
+    environment = run_eval_module._build_environment(clock_locked=True, collect_device=True)
 
     assert environment["accelerator_backend"] == "rocm"
     assert environment["gpu_name"] == "AMD Test GPU"
@@ -206,7 +206,7 @@ def test_build_environment_omits_optional_dsl_versions_when_absent(monkeypatch) 
     monkeypatch.setattr(run_eval_module, "get_core_package_versions", lambda: {})
     monkeypatch.setattr(run_eval_module, "get_accelerator_backend", lambda: "rocm")
 
-    environment = run_eval_module._build_environment(clock_locked=False)
+    environment = run_eval_module._build_environment(clock_locked=False, collect_device=True)
 
     assert environment["accelerator_backend"] == "rocm"
     assert environment["clock_locked"] is False

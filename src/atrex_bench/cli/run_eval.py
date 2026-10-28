@@ -1151,9 +1151,12 @@ def _ptl_state() -> str | None:
 
 
 def _build_environment(
-    *, clock_locked: bool, collect_device: bool = True
+    *, clock_locked: bool, collect_device: bool = False
 ) -> dict[str, object]:
-    """Build metadata, skipping device queries when ``collect_device`` is false.
+    """Build the environment block per docs/data_schema.md §七 7.5.
+
+    Device queries are opt-in for workers. The public field contract is also
+    documented in docs/run_eval_cli_contract.md under Environment Metadata.
 
     A supervisor's fallback metadata is provisional. The GPU worker replaces it in
     eval_result.json, so querying a device here only creates an extra context that
@@ -2401,7 +2404,7 @@ def _run_torch_compile_worker(
     """Benchmark torch.compile(reference) across all shapes and persist JSON."""
     worker_started = time.perf_counter()
     eval_output_path = artifact_dir / "eval_result.json"
-    environment = _build_environment(clock_locked=clock_locked)
+    environment = _build_environment(clock_locked=clock_locked, collect_device=True)
     runner_config = _build_runner_config(
         config_version=config_version,
         mode=_TORCH_COMPILE_EVAL_MODE,
@@ -2586,7 +2589,7 @@ def _run_eval_worker(
     worker_started = time.perf_counter()
     candidate_path = input_path
     eval_output_path = artifact_dir / "eval_result.json"
-    environment = _build_environment(clock_locked=clock_locked)
+    environment = _build_environment(clock_locked=clock_locked, collect_device=True)
     runner_config = _build_runner_config(
         config_version=config_version,
         mode=_CANDIDATE_EVAL_MODE,
@@ -3390,7 +3393,7 @@ def _run_abba_eval_process(
         compile_timeout_s=compile_timeout_s,
         collect_kernel_events=collect_kernel_events,
     )
-    environment = _build_environment(clock_locked=clock_locked)
+    environment = _build_environment(clock_locked=clock_locked, collect_device=False)
     eval_id = _eval_id()
     runs: list[dict[str, object]] = []
     initial_payload = _build_abba_payload(
@@ -3481,6 +3484,12 @@ def _run_abba_eval_process(
             artifact_dir_override=run_dir,
             shape_ids=shape_ids,
         )
+        if not runs:
+            # Reuse the first leg's metadata without probing the supervisor's
+            # device. Copy it so top-level clock annotations cannot alter the leg.
+            first_environment = result.get("environment")
+            if isinstance(first_environment, dict):
+                environment = dict(first_environment)
         runs.append(
             {
                 **step,
@@ -4062,7 +4071,7 @@ def run_abba_eval(
             reference_dir=reference_dir,
             candidate_path=candidate_path,
             runner_config=runner_config,
-            environment=_build_environment(clock_locked=False),
+            environment=_build_environment(clock_locked=False, collect_device=False),
             eval_id=_eval_id(),
             runs=[],
             error=error,

@@ -300,16 +300,21 @@ detach into another session are outside the original process group.
 
 ### Environment Metadata
 
-The top-level candidate and Torch compile supervisors collect only CPU-side
+The top-level candidate, Torch compile, and ABBA supervisors collect only CPU-side
 environment metadata when preparing fallback reports. They do not query devices,
 drivers, or PTL state: these queries can initialize an extra CUDA context and
 interfere with profiler counters in nested workers, including PPU ACU captures.
 The provisional `gpu_name`, `gpu_arch`, `accelerator_backend`, `driver_version`,
 and `PTL_STATE` fields remain `null` if no worker report is available. Package and
 runtime versions, Python version, and external clock-lock markers remain available.
-When a worker writes a report, its complete environment metadata is preserved,
-including on failure. Managed clock locking still performs its existing device
-identity and clock checks.
+Device queries are disabled by default in the metadata builder; the two GPU
+worker entrypoints explicitly enable them. When a worker writes a report, its
+complete environment metadata is preserved, including on failure. ABBA copies
+its first leg's environment into the aggregate report and retains every leg's
+environment in `abba.runs[].result.environment`. If the first leg produces only
+a supervisor fallback, the aggregate keeps that provisional environment even if
+later legs report device metadata. Managed clock locking still performs its
+existing device identity and clock checks.
 
 ## 5. Advanced Performance Options
 

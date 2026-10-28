@@ -2342,7 +2342,7 @@ def test_acquisition_failure_does_not_launch_worker(
     monkeypatch.setattr(
         run_eval_module,
         "_build_environment",
-        lambda *, clock_locked, collect_device=True: {
+        lambda *, clock_locked, collect_device=False: {
             "clock_locked": clock_locked, "device_metadata_collected": collect_device
         },
     )
@@ -3931,6 +3931,6 @@ def test_build_environment_includes_ptl_state(
         lambda *a, **kw: _FakeCompletedProcess(stdout=_AMD_SMI_SAMPLE),
     )
 
-    env = run_eval_module._build_environment(clock_locked=True)
+    env = run_eval_module._build_environment(clock_locked=True, collect_device=True)
     assert "PTL_STATE" in env
     assert env["PTL_STATE"] == "N/A"
