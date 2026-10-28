@@ -2,8 +2,12 @@
 
 Ray distribution is opt-in (`distribution="ray_data"`). The caller provides an
 existing Ray cluster, compatible native dependencies, and a GPU worker budget.
-Shapes become dataset rows, not independent Ray jobs. With N shapes and a worker
-limit K, all N rows are retained while at most K single-GPU actors run them.
+The driver first resolves optional `shape_ids`, preserving original IDs and seeds.
+Selected shapes become dataset rows (grouped by `ray_shapes_per_shard`), not
+independent Ray jobs. With N selected shards and a worker limit K, all N rows
+are retained while at most K single-GPU actors run them. Report merging requires
+exact coverage of the requested selection; a subset remains `partial=true`
+relative to the unchanged full reference set.
 Local evaluation remains the default and is also the rollback path.
 
 ![Execution architecture: CPU driver, bounded GPU pool, result registry and process cleanup](diagrams/ray-data-execution.png)
@@ -36,7 +40,7 @@ This is process lifecycle management, not isolation from hostile candidate code.
 | Actor termination confirmation | [`_drain_actors`, `_terminate_registry`, `_wait_actor_terminated`](../src/atrex_bench/ray_data.py) |
 | Lifetime pipe, signal propagation and descendant watchdog | [`supervised_popen` / `main`](../src/atrex_bench/_process_guard.py) |
 | Local CLI and isolated subworker stages | [`run_eval.py`](../src/atrex_bench/cli/run_eval.py) |
-| Complete coverage and compatible report validation | [`merge_evaluation_shards`](../src/atrex_bench/shards.py) |
+| Requested-set coverage and compatible report validation | [`merge_evaluation_shards`](../src/atrex_bench/shards.py) |
 
 The registry is unnamed and passed by actor handle; sharing a Ray namespace does
 not require claiming a fixed actor name. Independent drivers still have separate

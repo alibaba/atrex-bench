@@ -213,10 +213,13 @@ def merge_evaluation_shards(
     shards: Sequence[Mapping[str, object] | str | Path],
     *,
     output: str | Path | None = None,
+    shape_ids: object = None,
 ) -> dict[str, object]:
     """Merge complete, disjoint shape shards into the normal evaluation report.
 
-    Shards may be result mappings or eval_result.json paths. Missing/duplicate
+    Shards may be result mappings or eval_result.json paths. shape_ids declares
+    the required subset; omitted, every original shape is required. Coverage is
+    never inferred from the supplied reports. Missing/duplicate
     shapes and incompatible source, evaluator, config, or environment evidence
     raise ValueError. Stage failures remain in the report; they are not hidden.
     ABBA merging preserves all four legs and recomputes global geometric means.
@@ -234,6 +237,7 @@ def merge_evaluation_shards(
         all_ids = first["shape_selection"]["all_shape_ids"]
         if not all_ids or len(set(all_ids)) != len(all_ids):
             raise ValueError("Invalid complete shape set")
+        expected_ids = select_shape_ids(all_ids, shape_ids)
         identity = _compatibility(first)
         seen = set()
         for result in results:
@@ -267,21 +271,23 @@ def merge_evaluation_shards(
                 raise ValueError("Duplicate or empty shape selection in evaluation shards")
             if set(selected).difference(all_ids):
                 raise ValueError("Shard declares shapes outside the complete shape set")
+            if set(selected).difference(expected_ids):
+                raise ValueError("Shard declares shapes outside the requested shape set")
             if set(selection["input_seeds"]) != set(selected):
                 raise ValueError("Shard seed coverage differs from selected shapes")
             _validate_seeds(result)
             seen.update(selected)
-        missing = set(all_ids).difference(seen)
+        missing = set(expected_ids).difference(seen)
         if missing:
             raise ValueError("Missing evaluation shapes: " + ", ".join(sorted(missing)))
 
         merged = copy.deepcopy(first)
-        merged["shape_selection"]["selected_shape_ids"] = list(all_ids)
-        merged["shape_selection"]["partial"] = False
+        merged["shape_selection"]["selected_shape_ids"] = list(expected_ids)
+        merged["shape_selection"]["partial"] = expected_ids != list(all_ids)
         merged["shape_selection"]["input_seeds"] = _merge_shape_blocks(
-            results, ("shape_selection", "input_seeds"), all_ids
+            results, ("shape_selection", "input_seeds"), expected_ids
         )
-        merged["runner_config"]["shape_ids"] = list(all_ids)
+        merged["runner_config"]["shape_ids"] = list(expected_ids)
         merged["shard_evaluations"] = [
             {
                 "eval_id": result["eval_id"],
@@ -310,13 +316,18 @@ def merge_evaluation_shards(
                 if any({key: row[key] for key in expected} != expected for row in rows):
                     raise ValueError("Incompatible ABBA run order")
                 runs.append(
-                    {**expected, "result": merge_evaluation_shards([row["result"] for row in rows])}
+                    {
+                        **expected,
+                        "result": merge_evaluation_shards(
+                            [row["result"] for row in rows], shape_ids=expected_ids
+                        ),
+                    }
                 )
             errors = [str(result["error"]) for result in results if result.get("error")]
             if errors:
                 aggregate, error = None, "\n".join(errors)
             else:
-                aggregate, error = _aggregate_abba_runs(runs, all_ids)
+                aggregate, error = _aggregate_abba_runs(runs, expected_ids)
             merged["abba"].update(
                 runs=runs,
                 baseline=aggregate.get("baseline") if aggregate else None,
@@ -330,13 +341,17 @@ def merge_evaluation_shards(
             merged["error"] = error
         else:
             for stage in ("compile", "correctness", "performance"):
-                merged["passed"][stage] = _merge_shape_blocks(results, ("passed", stage), all_ids)
+                merged["passed"][stage] = _merge_shape_blocks(
+                    results, ("passed", stage), expected_ids
+                )
             for stage in ("correctness", "performance"):
-                merged[stage]["shapes"] = _merge_shape_blocks(results, (stage, "shapes"), all_ids)
+                merged[stage]["shapes"] = _merge_shape_blocks(
+                    results, (stage, "shapes"), expected_ids
+                )
             if "flydsl_compute_ratio" in merged:
                 ratio = merged["flydsl_compute_ratio"]
                 ratio["shapes"] = _merge_shape_blocks(
-                    results, ("flydsl_compute_ratio", "shapes"), all_ids
+                    results, ("flydsl_compute_ratio", "shapes"), expected_ids
                 )
                 valid = [
                     shape["ratio"]
@@ -349,7 +364,9 @@ def merge_evaluation_shards(
                 )
                 average = sum(valid) / len(valid) if valid else 0.0 if non_flydsl else None
                 ratio.update(
-                    average=average, valid_shape_count=len(valid), total_shape_count=len(all_ids)
+                    average=average,
+                    valid_shape_count=len(valid),
+                    total_shape_count=len(expected_ids),
                 )
             errors = [str(result["error"]) for result in results if result.get("error")]
             merged["error"] = "\n".join(errors) or None

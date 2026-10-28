@@ -249,13 +249,16 @@ and ABBA modes support it. Results mark the selected IDs and partial coverage in
 
 Run disjoint shards on independent GPUs, then merge their result dictionaries
 or JSON paths with `atrex_bench.merge_evaluation_shards(shards, output="merged.json")`.
-Merging requires complete coverage and matching input/evaluator hashes,
+Merging requires complete coverage by default. To merge a declared subset, pass
+`shape_ids=["0", "2"]`; every requested ID must appear exactly once and no other
+ID may appear. Subset reports retain `shape_selection.partial=true`. All merges
+require matching input/evaluator hashes,
 settings, hardware, toolchain, and seeds. See the
 [shape shard contract and Gateway examples](docs/run_eval_cli_contract.md#explicit-shape-shards-and-offline-merging)
 for `agate eval --shape-shards` and manual subset usage.
 
-Inside an existing Ray cluster, Atrex-Bench can split the complete shape set
-and merge the report automatically:
+Inside an existing Ray cluster, Atrex-Bench can split all shapes or a selected
+subset and merge the report automatically:
 
 ```bash
 python scripts/run_eval.py --distribution ray_data --ray-max-workers 4 \
@@ -263,7 +266,10 @@ python scripts/run_eval.py --distribution ray_data --ray-max-workers 4 \
   --output results/distributed
 ```
 
-The same options work in `evaluate(config)`. The CPU driver snapshots the full
+Add `--shape-ids 0,2` (or `--shape-ids @ids.json`) to distribute only that subset.
+The driver resolves the selection before splitting it into shards, so worker
+counts and retries apply only to selected shapes. The same options work in
+`evaluate(config)`, including `shape_ids`. The CPU driver snapshots the full
 reference and evaluator sources. The Ray Data pool defaults to one GPU worker per
 shard; an explicit positive worker limit caps that count. Each actor reserves one
 GPU and runs the ordinary

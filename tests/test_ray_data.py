@@ -16,9 +16,10 @@ from atrex_bench import AtrexConfigError, evaluate
 from atrex_bench import ray_data as adapter
 from atrex_bench._process_guard import LIFETIME_FD_ENV, supervised_popen
 from atrex_bench.cli import run_eval as runner
-from tests.test_shape_shards import IDS
+from tests import test_shape_shards
 
-pytest_plugins = ["tests.test_shape_shards"]
+IDS = test_shape_shards.IDS
+evaluator = test_shape_shards.evaluator
 
 FAKE_RAY = """
 import types
@@ -189,7 +190,6 @@ def config_for(reference, candidate, output, **overrides):
         {"ray_resources": {"worker": float("nan")}},
         {"ray_node_selector": {"x": 1}},
         {"ray_namespace": ""},
-        {"shape_ids": ["10"]},
         {"clock_lock_device": "0"},
         {"checkpoint_dir": "/driver/checkpoints"},
     ],
@@ -671,7 +671,10 @@ def test_actor_ready_timeout_is_not_death_confirmation(fake_ray, monkeypatch):
     assert not handle.dead
 
 
-def test_abba_runs_full_schedule_in_each_shard(evaluator, fake_ray, monkeypatch, tmp_path):
+@pytest.mark.parametrize("selection", [None, ["31", "10"]])
+def test_abba_runs_full_schedule_in_each_shard(
+    evaluator, fake_ray, monkeypatch, tmp_path, selection
+):
     local, reference, candidate, _ = evaluator
     baseline = candidate.parent / "baseline.py"
     baseline.write_bytes(candidate.read_bytes())
@@ -700,7 +703,8 @@ def test_abba_runs_full_schedule_in_each_shard(evaluator, fake_ray, monkeypatch,
     monkeypatch.setattr("atrex_bench.evaluate", abba)
     result = adapter.evaluate_ray_data(
         config_for(
-            reference, candidate, tmp_path / "out", eval_mode="abba", baseline_input=str(baseline)
+            reference, candidate, tmp_path / "out", eval_mode="abba", baseline_input=str(baseline),
+            shape_ids=selection, ray_shapes_per_shard=2 if selection is None else 1,
         )
     )
     assert [name for name, _ in schedule] == [
@@ -709,11 +713,20 @@ def test_abba_runs_full_schedule_in_each_shard(evaluator, fake_ray, monkeypatch,
         "candidate.py",
         "baseline.py",
     ] * 2
-    assert [ids for _, ids in schedule] == [["10", "2"]] * 4 + [["31"]] * 4
-    assert result["shape_selection"]["partial"] is False
+    expected_ids = IDS if selection is None else ["10", "31"]
+    first_ids = ["10", "2"] if selection is None else ["10"]
+    assert [ids for _, ids in schedule] == [first_ids] * 4 + [["31"]] * 4
+    assert result["shape_selection"]["partial"] is (selection is not None)
     assert len(result["distribution"]["shards"]) == 2
     for leg in result["abba"]["runs"]:
-        assert leg["result"]["shape_selection"]["selected_shape_ids"] == IDS
+        assert leg["result"]["shape_selection"]["selected_shape_ids"] == expected_ids
+        assert leg["result"]["shape_selection"]["partial"] is (selection is not None)
+    serial = abba({
+        "baseline_input": str(baseline), "input": str(candidate),
+        "output": str(tmp_path / "serial"), "shape_ids": expected_ids,
+    })
+    for key in ("baseline", "candidate", "comparison"):
+        assert result["abba"][key] == serial["abba"][key]
 
 
 def test_incompatible_worker_environment_fails_merge(evaluator, fake_ray, monkeypatch, tmp_path):
@@ -907,7 +920,9 @@ def _retry_fixture(tmp_path, monkeypatch):
     candidate.write_text('class Model: pass\n')
     monkeypatch.setattr(adapter, '_start_directory_janitor', lambda *args: None)
     monkeypatch.setattr(adapter.time, 'sleep', lambda seconds: None)
-    monkeypatch.setattr('atrex_bench.merge_evaluation_shards', lambda rows: {'rows': rows})
+    monkeypatch.setattr(
+        'atrex_bench.merge_evaluation_shards', lambda rows, **kwargs: {'rows': rows}
+    )
     return config_for(reference, candidate, tmp_path / 'output', ray_shapes_per_shard=1)
 
 
@@ -1054,4 +1069,89 @@ def test_pre_256_context_does_not_require_map_exception_retry_option(
     result = adapter.evaluate_ray_data(config)
     assert len(result['rows']) == 20
     assert not hasattr(context, 'retried_map_errors')
+    assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
+
+
+@pytest.mark.parametrize("selection_kind", ["list", "comma", "json_file", "text_file"])
+@pytest.mark.parametrize("group_size", [1, 2])
+def test_selected_shapes_distribute_and_match_local(
+    evaluator, fake_ray, monkeypatch, tmp_path, selection_kind, group_size
+):
+    local, reference, candidate, calls = evaluator
+    ray, _ = fake_ray
+    selected = ["10", "31"]
+    expected = local(selected)
+    calls.clear()
+    selection = ["31", "10"]
+    selection_file = None
+    if selection_kind == "comma":
+        selection = "31,10"
+    elif selection_kind.endswith("file"):
+        selection_file = tmp_path / "ids.txt"
+        selection_file.write_text(
+            '["31", "10"]' if selection_kind == "json_file" else "31\n10\n"
+        )
+        selection = "@" + str(selection_file)
+
+    def run(config):
+        # The driver resolves @files; workers never need access to them.
+        if selection_file is not None and selection_file.exists():
+            selection_file.unlink()
+        assert config["distribution"] == "local"
+        assert isinstance(config["shape_ids"], list)
+        return local(config["shape_ids"])
+
+    monkeypatch.setattr("atrex_bench.evaluate", run)
+    result = adapter.evaluate_ray_data(config_for(
+        reference, candidate, tmp_path / "out", shape_ids=selection,
+        ray_shapes_per_shard=group_size, ray_max_workers=100,
+    ))
+    for key in ("passed", "correctness", "performance", "shape_selection"):
+        assert result[key] == expected[key]
+    assert calls == selected
+    assert result["distribution"]["max_workers"] == (2 if group_size == 1 else 1)
+    scheduled = [sid for row in ray.data.last_rows for sid in json.loads(row["shape_ids_json"])]
+    assert scheduled == selected
+    assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
+
+
+@pytest.mark.parametrize("selection", [[], ["missing"], ["10", "10"], [10], "@missing-ids.json"])
+def test_invalid_subset_fails_before_ray_initialization(
+    evaluator, fake_ray, tmp_path, selection
+):
+    _, reference, candidate, _ = evaluator
+    ray, _ = fake_ray
+    with pytest.raises(AtrexConfigError, match="Invalid Ray shape set"):
+        adapter.evaluate_ray_data(config_for(
+            reference, candidate, tmp_path / "out", shape_ids=selection,
+        ))
+    assert ray.initialized is None
+    assert not ray.handles
+
+
+def test_subset_retry_does_not_run_successful_or_unselected_shapes(
+    evaluator, fake_ray, monkeypatch, tmp_path
+):
+    from collections import Counter
+
+    local, reference, candidate, _ = evaluator
+    ray, _ = fake_ray
+    expected = local(["10", "31"])
+    attempts = Counter()
+
+    def run(config):
+        sid = config["shape_ids"][0]
+        attempts[sid] += 1
+        if sid == "31" and attempts[sid] == 1:
+            raise ray.exceptions.RayActorError("worker lost")
+        return local(config["shape_ids"])
+
+    monkeypatch.setattr("atrex_bench.evaluate", run)
+    result = adapter.evaluate_ray_data(config_for(
+        reference, candidate, tmp_path / "out", shape_ids=["31", "10"],
+        ray_shapes_per_shard=1,
+    ))
+    assert attempts == {"10": 1, "31": 2}
+    for key in ("passed", "correctness", "performance", "shape_selection"):
+        assert result[key] == expected[key]
     assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
