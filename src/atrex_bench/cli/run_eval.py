@@ -1266,6 +1266,7 @@ def _serialize_performance_shapes(
             "graph_correctness": result.graph_correctness,
             "observed_kernels": result.observed_kernels,
             "error": result.error,
+            **({"distributed": result.distributed} if result.distributed is not None else {}),
         }
         for shape_id, result in performance.items()
     }
@@ -1869,7 +1870,8 @@ def _build_single_shape_worker_command(
     if not collect_kernel_events:
         argv.append("--skip-kernel-attribution")
     argv.extend(_validation_mode_cli_args(validation_mode))
-    return argv
+    from atrex_bench.eval.distributed import launch_command, world_size
+    return launch_command(argv, world_size(reference_dir))
 
 
 def _load_shape_result_payload(path: Path) -> dict[str, object] | None:
@@ -2065,7 +2067,7 @@ def _with_observed_kernels(
     return replace(result, observed_kernels=observed)
 
 
-def _run_single_shape_main(
+def _run_single_shape_body(
     *,
     candidate_path: Path,
     reference_dir: Path,
@@ -2089,7 +2091,7 @@ def _run_single_shape_main(
     graph_max_rel_l2: float | None = None,
     trust_mode: str = _TRUST_MODE_TRUSTED,
     validation_mode: str = _VALIDATION_MODE_FULL,
-) -> None:
+) -> dict:
     """Run the selected validation stages for one shape and emit JSON.
 
     The parent reads ``shape_result_path``. If this process gets killed by
@@ -2141,6 +2143,12 @@ def _run_single_shape_main(
             candidate_timeout_s=candidate_timeout_s,
             untrusted_mode=trust_mode == _TRUST_MODE_UNTRUSTED,
         )
+
+    from atrex_bench.eval.distributed import all_pass
+    if not all_pass(correctness_result.status in {"passed", "skipped"}):
+        if correctness_result.status == "passed":
+            correctness_result = replace(correctness_result, status="failed",
+                                         reason="correctness failed on another rank")
 
     # Read the artifact-based compile signal NOW (before the wrapper is
     # removed) so the value reflects only the correctness-phase compilation.
@@ -2217,8 +2225,48 @@ def _run_single_shape_main(
         "correctness": _correctness_to_payload(correctness_result),
         "performance": _performance_to_payload(performance_result),
     }
-    shape_result_path.parent.mkdir(parents=True, exist_ok=True)
-    shape_result_path.write_text(json.dumps(payload), encoding="utf-8")
+    return payload
+
+
+def _run_single_shape_main(**kwargs) -> None:
+    from atrex_bench.eval import distributed
+
+    count = distributed.world_size(kwargs["reference_dir"])
+    if count == 1:
+        payload = _run_single_shape_body(**kwargs)
+    else:
+        budget = float(kwargs["candidate_timeout_s"]) + float(kwargs["perf_timeout_s"])
+        with distributed.rank_session(count, budget) as devices:
+            payloads = distributed.gather(_run_single_shape_body(**kwargs))
+            if torch.distributed.get_rank() != 0:
+                return
+            payload = payloads[0]
+            # Preserve every rank's raw case evidence, including failures that
+            # occur only off rank zero. Never benchmark after a failed rank.
+            cases = []
+            for rank, item in enumerate(payloads):
+                for case in item["correctness"]["cases"]:
+                    if case.get("input_artifact") is not None:
+                        case["input_artifact"]["rank"] = rank
+                    cases.append(case)
+            payload["correctness"]["cases"] = cases
+            failures = [f"rank {rank}: {item['correctness'].get('reason')}"
+                        for rank, item in enumerate(payloads)
+                        if item["correctness"]["status"] == "failed"]
+            if failures:
+                payload["correctness"]["status"] = "failed"
+                payload["correctness"]["reason"] = "; ".join(failures)
+            perf_failures = [f"rank {rank}: {item['performance']['error']}"
+                             for rank, item in enumerate(payloads) if item["performance"].get("error")]
+            if perf_failures or failures:
+                payload["performance"]["samples"] = []
+                payload["performance"]["error"] = "; ".join(perf_failures or failures)
+            evidence = payload["performance"].get("distributed") or {}
+            evidence.update(world_size=count, backend="nccl", ranks=devices)
+            payload["performance"]["distributed"] = evidence
+    path = kwargs["shape_result_path"]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload), encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
