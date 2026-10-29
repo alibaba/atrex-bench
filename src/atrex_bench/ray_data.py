@@ -78,10 +78,6 @@ def validate_distribution(config):
         raise AtrexConfigError("ray_namespace must be a non-empty string")
     if mode == "ray_data" and os.name != "posix":
         raise AtrexConfigError("ray_data distribution requires POSIX workers")
-    if mode == "ray_data" and config.get("shape_ids") is not None:
-        raise AtrexConfigError(
-            "ray_data requires the full shape set; use distribution=local for subsets"
-        )
     if mode == "ray_data" and config.get("clock_lock_device") is not None:
         raise AtrexConfigError("ray_data selects each Ray-assigned GPU; omit clock_lock_device")
     if mode == "ray_data" and config.get("checkpoint_dir") is not None:
@@ -367,7 +363,7 @@ def _terminate_registry(ray, registry):
 
 
 def evaluate_ray_data(config):
-    """Distribute full-shape local evaluations and return a strict native report."""
+    """Distribute selected local evaluations and return a strict native report."""
     from atrex_bench import AtrexConfigError, AtrexEvaluationError, merge_evaluation_shards
     from atrex_bench._process_guard import WORKER_EXIT_GRACE_S
     from atrex_bench.shards import select_shape_ids
@@ -388,10 +384,11 @@ def evaluate_ray_data(config):
         all_ids = sorted(json.loads((Path(config["reference_dir"]) / "shapes.json").read_text()))
         # Validate the complete set here; each dataset row selects its own subset.
         all_ids = select_shape_ids(all_ids, all_ids)
+        selected_ids = select_shape_ids(all_ids, config.get("shape_ids"))
     except (OSError, ValueError, TypeError) as error:
         raise AtrexConfigError(f"Invalid Ray shape set: {error}") from error
     size = config.get("ray_shapes_per_shard", 1)
-    shards = [all_ids[index : index + size] for index in range(0, len(all_ids), size)]
+    shards = [selected_ids[index : index + size] for index in range(0, len(selected_ids), size)]
     if not shards:
         raise AtrexConfigError("ray_data requires at least one shape")
     maximum = min(config.get("ray_max_workers", len(shards)), len(shards))
@@ -464,7 +461,9 @@ def evaluate_ray_data(config):
         if len(results) != len(rows):
             raise AtrexEvaluationError("Duplicate Ray shard results")
         results.sort(key=lambda row: row["shard_id"])
-        merged = merge_evaluation_shards([json.loads(row["result_json"]) for row in results])
+        merged = merge_evaluation_shards(
+            [json.loads(row["result_json"]) for row in results], shape_ids=selected_ids
+        )
         executions = [json.loads(row["execution_json"]) for row in results]
         progress = ray.get(registry.progress.remote())
     except BaseException as error:

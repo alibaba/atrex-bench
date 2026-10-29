@@ -108,14 +108,20 @@ report = merge_evaluation_shards([a, b], output="/abs/merged_eval_result.json")
 ```
 
 `merge_evaluation_shards` also accepts `eval_result.json` paths. It requires
-exactly one result for every original shape and raises `ValueError` for missing
-or duplicate shapes, mismatched source hashes, evaluator versions/fingerprints,
+exactly one result for every original shape by default. To merge only a declared
+subset, use `merge_evaluation_shards(shards, shape_ids=["0", "2"])`. It requires
+exactly that subset, never infers coverage from the supplied reports, and raises
+`ValueError` for unexpected, missing or duplicate shapes, mismatched source hashes,
+evaluator versions/fingerprints,
 settings, seeds, GPU models, toolchain versions, or clock targets. GPU UUIDs,
 indices, and individual clock traces may differ across workers. Failed stages
 remain failed in the merged report. ABBA merging combines corresponding legs
-and recomputes the overall geometric means from all shapes; it never averages
+and recomputes the overall geometric means from the requested shapes; it never averages
 shard speedups. `shard_evaluations` preserves each source eval ID, selection,
-and full environment evidence. The resulting `shape_selection.partial` is false.
+and full environment evidence. `shape_selection.all_shape_ids` remains the full
+reference set; `selected_shape_ids` is the requested set in original string order.
+`shape_selection.partial` is true when that set is smaller than the reference set,
+even after every requested shard has completed.
 Driver versions may differ across Ray nodes: each shard retains its exact
 `environment.driver_version`; the merged value is always `null` because it has
 no single host driver, including when all selected nodes share a version. This
@@ -143,7 +149,8 @@ agate eval --profile pre --gpu L20N --candidate candidate.py --reference-dir ope
 
 For manual shards, download each native `eval_result.json` artifact and pass the
 paths to `merge_evaluation_shards`. The files must cover the entire original
-shape set. A partial report alone is not a full-operator result. Deployments can
+shape set unless the caller explicitly supplies the required `shape_ids` subset.
+A partial report alone is not a full-operator result. Deployments can
 check `atrex_bench.SHAPE_SHARD_SCHEMA_VERSION == "v1"` and the presence of
 `merge_evaluation_shards` before accepting manual shards. Automatic Ray Data
 distribution also requires the capability described below.
@@ -184,7 +191,7 @@ report = evaluate({
 |---|---|---|
 | `distribution` | `local` | `local` or `ray_data`. |
 | `ray_max_workers` | shard count | Initial pool of one-GPU actors; an explicit positive integer caps it at the shard count. |
-| `ray_shapes_per_shard` | `1` | Positive number of consecutive original shape IDs per dataset row. |
+| `ray_shapes_per_shard` | `1` | Positive number of consecutive selected shape IDs per dataset row. |
 | `ray_max_shard_retries` | `3` | Worker/node failure retries per shard, integer 0–3. The CLI also accepts `--ray-max-shard-retries`. |
 | `ray_resources` | `{}` | Ray custom resource requirements for GPU workers; positive numbers, excluding `CPU` and `GPU`. |
 | `ray_node_selector` | `{}` | Ray `label_selector` mapping for GPU workers; the zero-GPU registry stays on the driver node. |
@@ -216,9 +223,26 @@ transported source paths; install native dependencies in the worker interpreter'
 `site-packages`. Ray Data
 requires `ray[data]>=2.54,<2.57`, including its pandas/PyArrow dependencies.
 
-Automatic distribution requires the complete shape set. Explicit `shape_ids`
-uses `distribution="local"` and the manual merge API. Omit
-`clock_lock_device`: Ray assigns each actor's visible GPU. A relative
+Automatic distribution supports `shape_ids` as a list, comma-separated string,
+or `@JSON/text` file, just like local evaluation. For example:
+
+```bash
+python scripts/run_eval.py --distribution ray_data --shape-ids 0,2 \
+  --ray-max-workers 2 --input candidate.py --reference-dir operator --output results
+```
+
+The driver resolves and validates the selection before scheduling; workers receive
+resolved IDs and do not read the selection file. Only selected shapes become
+shards, and the worker count is capped by that shard count. Each selected shape
+keeps its original ID and input seeds; the full reference bundle and source hashes
+remain unchanged. Empty, duplicate, and unknown selections fail before Ray starts.
+Merging requires exact coverage of the requested subset, including each ABBA leg;
+a subset report remains `partial=true` relative to the full reference set. Worker
+retries reuse completed selected shards and never schedule unselected shapes.
+Gateway support for forwarding a subset to Ray Data depends on the deployed
+Gateway version; this benchmark capability does not change Gateway admission.
+
+Omit `clock_lock_device`: Ray assigns each actor's visible GPU. A relative
 `checkpoint_dir` remains worker-local; absolute driver checkpoint paths are
 rejected. The driver persists one final `eval_result.json` and the normal SDK
 output pointer. Per-shard files and checkpoints remain temporary worker files;

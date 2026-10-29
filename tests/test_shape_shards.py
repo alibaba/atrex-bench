@@ -321,3 +321,33 @@ def test_cli_and_sdk_real_failed_compile_only_selected_ids(evaluator, tmp_path):
     output = completed.stdout.split("[OUTPUT] ")[-1].strip()
     cli_result = json.loads(Path(output).read_text())
     assert list(cli_result["passed"]["compile"]) == ["2"]
+
+
+@pytest.mark.parametrize("mode", ["full", "correctness_only", "performance_only"])
+def test_merge_explicit_subset_matches_local(evaluator, mode):
+    evaluate, _, _, _ = evaluator
+    selected = ["10", "31"]
+    local = evaluate(selected, mode=mode)
+    shards = [evaluate([sid], mode=mode) for sid in reversed(selected)]
+    merged = merge_evaluation_shards(shards, shape_ids=["31", "10"])
+    for key in ("passed", "correctness", "performance", "shape_selection"):
+        assert merged[key] == local[key]
+    assert merged["shape_selection"]["all_shape_ids"] == IDS
+    assert merged["shape_selection"]["partial"] is True
+    assert merged["runner_config"]["shape_ids"] == selected
+    with pytest.raises(ValueError, match="Missing evaluation shapes"):
+        merge_evaluation_shards(shards)
+
+
+def test_merge_subset_requires_exact_declared_coverage(evaluator):
+    evaluate, _, _, _ = evaluator
+    first = evaluate(["10"])
+    with pytest.raises(ValueError, match="Missing evaluation shapes"):
+        merge_evaluation_shards([first], shape_ids=["10", "31"])
+    with pytest.raises(ValueError, match="outside the requested"):
+        merge_evaluation_shards([first, evaluate(["2"])], shape_ids=["10", "31"])
+    with pytest.raises(ValueError, match="Duplicate"):
+        merge_evaluation_shards([first, first], shape_ids=["10"])
+    for invalid in ([], ["unknown"], ["10", "10"]):
+        with pytest.raises(ValueError):
+            merge_evaluation_shards([first], shape_ids=invalid)
