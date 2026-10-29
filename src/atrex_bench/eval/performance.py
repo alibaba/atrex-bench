@@ -277,30 +277,6 @@ _PROFILER_BREAKDOWN_ITERS = 5
 _DEFAULT_PERF_TIMEOUT_S = 600.0
 
 
-def _bench_all_runs(do_bench, bench_fn, *, warmup_iters: int, bench_iters: int) -> list[float]:
-    """Per-iteration times from ``do_bench``, or [] if this build cannot report them.
-
-    ``return_mode="all"`` only changes how do_bench reduces: it measures every
-    iteration either way and was discarding the individual values. Older triton
-    builds do not accept the argument, and raise before running anything, so the
-    caller can fall back without having paid for a benchmark.
-    """
-    try:
-        raw = do_bench(
-            bench_fn,
-            warmup=warmup_iters,
-            rep=bench_iters,
-            return_mode="all",
-        )
-    except TypeError:
-        return []
-    if isinstance(raw, (list, tuple)):
-        return [float(value) for value in raw]
-    if torch.is_tensor(raw):
-        return [float(value) for value in raw.flatten().tolist()]
-    return []
-
-
 def _measure_eager_samples(
     *,
     bench_fn,
@@ -308,49 +284,61 @@ def _measure_eager_samples(
     warmup_iters: int,
     bench_iters: int,
 ) -> _MeasurementResult:
-    try:
-        from triton.testing import do_bench
-    except ModuleNotFoundError as exc:
-        if exc.name != "triton":
-            raise
-        for _ in range(max(warmup_iters, 1)):
-            bench_fn()
-        sync_device(device)
-
-        reps = max(bench_iters, 1)
-        start = time.perf_counter()
-        for _ in range(reps):
-            bench_fn()
-        sync_device(device)
-        elapsed_ms = (time.perf_counter() - start) * 1000.0 / reps
-        return _MeasurementResult(
-            samples=[PerformanceSample(end_to_end_time_ms=elapsed_ms)]
-        )
-
-    raw_times = _bench_all_runs(
-        do_bench,
-        bench_fn,
-        warmup_iters=warmup_iters,
-        bench_iters=bench_iters,
+    """Run exactly the requested warmups and record one sample per timed forward."""
+    device_context = (
+        torch.cuda.device(device) if device.type == "cuda" else contextlib.nullcontext()
     )
-    if raw_times:
+    with device_context:
+        for _ in range(warmup_iters):
+            bench_fn()
+        sync_device(device)
+
+        if device.type != "cuda":
+            samples = []
+            for _ in range(bench_iters):
+                start = time.perf_counter()
+                bench_fn()
+                elapsed_ms = (time.perf_counter() - start) * 1000.0
+                samples.append(PerformanceSample(end_to_end_time_ms=elapsed_ms))
+            return _MeasurementResult(samples=samples)
+
+        # Preserve Triton's device-specific cache eviction when it is installed,
+        # without using do_bench's millisecond-based warmup/repetition budgets.
+        clear_cache = None
+        try:
+            from triton import runtime
+        except ModuleNotFoundError as exc:
+            if exc.name != "triton":
+                raise
+        else:
+            cache_driver = getattr(runtime.driver, "active", runtime.driver)
+            if hasattr(cache_driver, "get_empty_cache_for_benchmark"):
+                cache = cache_driver.get_empty_cache_for_benchmark()
+
+                def clear_cache() -> None:
+                    cache_driver.clear_cache(cache)
+            else:
+                # Older Triton do_bench versions evict with a 256 MB int buffer.
+                cache = torch.empty(64_000_000, dtype=torch.int32, device=device)
+                clear_cache = cache.zero_
+
+        event_pairs = [
+            (torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True))
+            for _ in range(bench_iters)
+        ]
+        for start_event, end_event in event_pairs:
+            if clear_cache is not None:
+                clear_cache()
+            start_event.record()
+            bench_fn()
+            end_event.record()
+        sync_device(device)
         return _MeasurementResult(
             samples=[
-                PerformanceSample(end_to_end_time_ms=value) for value in raw_times
+                PerformanceSample(end_to_end_time_ms=float(start.elapsed_time(end)))
+                for start, end in event_pairs
             ]
         )
-
-    # Triton too old to report per-iteration times: keep the reduced value
-    # rather than fail. Consumers reduce the list anyway, so one entry is a
-    # degraded result, not a broken one.
-    elapsed_ms = do_bench(
-        bench_fn,
-        warmup=warmup_iters,
-        rep=bench_iters,
-    )
-    return _MeasurementResult(
-        samples=[PerformanceSample(end_to_end_time_ms=elapsed_ms)]
-    )
 
 
 def _flush_cuda_cache(cache_flush_mb: int, device: torch.device) -> None:
@@ -513,9 +501,8 @@ def _measure_cuda_graph_samples(
     max_rel_l2: float | None = None,
     collect_kernel_events: bool = False,
 ) -> _MeasurementResult:
-    eager_output = None
-    for _ in range(max(1, warmup_iters)):
-        eager_output = bench_fn()
+    # The eager oracle and graph capture are setup, separate from replay warmups.
+    eager_output = bench_fn()
     sync_device(device)
     eager_snapshot = _snapshot_output_tensors(eager_output)
 
@@ -606,14 +593,14 @@ def _measure_runner_samples(
 ) -> _MeasurementResult:
     """Measure end-to-end forward times for one model variant.
 
-    End-to-end timing uses ``triton.testing.do_bench`` (CUDA events, no
-    per-iter ``torch.cuda.synchronize`` overhead). When
+    End-to-end GPU timing uses CUDA events with exact iteration counts and no
+    per-iter ``torch.cuda.synchronize`` overhead. When
     ``collect_kernel_events`` is true an extra short profiler loop runs
     afterwards to gather per-kernel device time for the flydsl breakdown
     (its per-iter wall is inaccurate, intentionally not used for
     ``end_to_end_time_ms``).
 
-    The WHOLE perf phase (do_bench + optional breakdown loop) is wrapped
+    The WHOLE perf phase (timed forwards + optional breakdown loop) is wrapped
     in a single SIGALRM ``perf_timeout_s`` budget.
     """
     benchmark_inputs = clone_model_inputs(inputs)
@@ -654,8 +641,8 @@ def _measure_runner_samples(
 
         _warmup_device_profiler(device)
         # Profiler loop for kernel breakdown only. Already warm from
-        # do_bench, no extra warmup. Per-iter wall is intentionally
-        # NOT used for end_to_end_time_ms (do_bench is the source).
+        # timing, no extra warmup. Per-iter wall is intentionally
+        # NOT used for end_to_end_time_ms (CUDA events are the source).
         profiler_ctx: contextlib.AbstractContextManager = profile(
             activities=_profile_activities(device),
             schedule=_build_profiler_schedule(0, _PROFILER_BREAKDOWN_ITERS),

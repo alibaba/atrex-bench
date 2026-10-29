@@ -213,7 +213,7 @@ def _derived_shape_wall_timeout_s(
     Two user-facing knobs, summed with a small reference overhead:
       * ``candidate_timeout_s`` bounds each candidate touch (instantiate +
         each correctness forward call). The reference is never timed out.
-      * ``perf_timeout_s`` bounds the WHOLE perf phase (do_bench measurement
+      * ``perf_timeout_s`` bounds the WHOLE perf phase (forward measurement
         + profiler-breakdown loop).
 
     Worst-case per-shape path:
@@ -2157,7 +2157,7 @@ def _run_single_shape_main(
     compile_succeeded = flydsl_compile_succeeded() if tracker_installed else None
 
     # Remove the JitFunction.__call__ wrapper BEFORE the performance
-    # benchmark so triton.do_bench measures the candidate with zero
+    # benchmark so the timer measures the candidate with zero
     # tracking overhead on the hot dispatch path.
     if tracker_installed:
         uninstall_jit_compile_tracker()
@@ -4420,11 +4420,9 @@ def main() -> None:
         type=int,
         default=None,
         help=(
-            "Warmup budget. In eager mode this is a DURATION IN MILLISECONDS, "
-            "not a count: it is triton do_bench's `warmup`, documented there as "
-            "'Warmup time (in ms)'. In cuda_graph_replay mode it is a count of "
-            "replays. The name predates the distinction and is kept for "
-            "compatibility."
+            "Number of untimed warmup forwards (eager) or graph replays "
+            "(cuda_graph_replay). Zero disables warmup. Graph validation and "
+            "capture are separate setup calls."
         ),
     )
     parser.add_argument(
@@ -4432,14 +4430,9 @@ def main() -> None:
         type=int,
         default=None,
         help=(
-            "Benchmark budget. In eager mode this is a DURATION IN MILLISECONDS, "
-            "not a count: it is triton do_bench's `rep`, documented there as "
-            "'Repetition time (in ms)'. So --bench-iters 100 means 'keep timing "
-            "for about 100ms', which is thousands of runs for a fast kernel and "
-            "possibly one for a slow one. In cuda_graph_replay mode it IS a "
-            "count of replays. The name predates the distinction and is kept "
-            "for compatibility; the number of iterations actually achieved is "
-            "the length of the samples list in eval_result.json."
+            "Number of timed forwards (eager) or graph replays "
+            "(cuda_graph_replay) per shape. Records exactly one timing sample "
+            "per iteration."
         ),
     )
     parser.add_argument(
@@ -4596,7 +4589,7 @@ def main() -> None:
         default=None,
         help=(
             "Wall-clock timeout (seconds) for the ENTIRE perf phase per shape "
-            "(do_bench end-to-end measurement + the optional profiler-breakdown "
+            "(end-to-end measurement + the optional profiler-breakdown "
             "loop for kernel attribution). Pass <= 0 to disable. Default 600s "
             "(10 min)."
         ),

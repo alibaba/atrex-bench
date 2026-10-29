@@ -20,7 +20,7 @@ from atrex_bench.eval.correctness import check_correctness
 
 EVAL_ID_PATTERN = re.compile(r"^\d{8}T\d{6}Z-[0-9a-f]{8}$")
 
-# End-to-end run_eval tests require torch.cuda or torch.hip for do_bench timing
+# End-to-end run_eval tests require torch.cuda or torch.hip for device-event timing
 _gpu_available = torch.cuda.is_available()
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures"
@@ -129,9 +129,7 @@ def test_run_eval_single_problem(tmp_path: Path) -> None:
     assert cases[0]["outputs"][0]["name"] == "out"
 
     samples = result["performance"]["shapes"]["0"]["samples"]
-    # Modern do_bench returns individual timings; older versions and the
-    # fallback may return a single aggregate. Both must contain valid samples.
-    assert samples
+    assert len(samples) == 3
     assert all(
         math.isfinite(sample["end_to_end_time_ms"]) and sample["end_to_end_time_ms"] > 0
         for sample in samples
@@ -3601,7 +3599,7 @@ def test_derived_shape_wall_timeout_formula() -> None:
 
     Phase budgets per shape:
       - candidate touch (instantiate + each correctness forward) <= candidate_timeout
-      - perf phase (do_bench + profiler breakdown)               <= perf_timeout
+      - perf phase (timed forwards + profiler breakdown)        <= perf_timeout
       - reference cold-start                                      <= 60s fixed
     """
     from scripts.run_eval import _derived_shape_wall_timeout_s
