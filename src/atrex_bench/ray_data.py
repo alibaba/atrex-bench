@@ -78,10 +78,6 @@ def validate_distribution(config):
         raise AtrexConfigError("ray_namespace must be a non-empty string")
     if mode == "ray_data" and os.name != "posix":
         raise AtrexConfigError("ray_data distribution requires POSIX workers")
-    if mode == "ray_data" and config.get("shape_ids") is not None:
-        raise AtrexConfigError(
-            "ray_data requires the full shape set; use distribution=local for subsets"
-        )
     if mode == "ray_data" and config.get("clock_lock_device") is not None:
         raise AtrexConfigError("ray_data selects each Ray-assigned GPU; omit clock_lock_device")
     if mode == "ray_data" and config.get("checkpoint_dir") is not None:
@@ -154,10 +150,26 @@ class _ActorRegistry:
         self.max_retries = max_retries
         self.results = {}
         self.attempts = {}
+        self.failed_shards = {}
+
+    def _worker_lost(self, execution):
+        if execution["status"] != "running":
+            return
+        end = time.time_ns()
+        elapsed = (end - execution["start_utc_ns"]) / 1_000_000_000
+        execution.update(
+            status="worker_lost", end_utc_ns=end,
+            duration_s=elapsed if elapsed >= 0 else None,
+            end_time_source="driver_observed_loss", end_time_estimated=True,
+        )
 
     def register(self, handle):
         actor_id = handle._actor_id.hex()
         restarted = actor_id in self.handles
+        if restarted:
+            for attempts in self.attempts.values():
+                if attempts and attempts[-1].get("actor_id") == actor_id:
+                    self._worker_lost(attempts[-1])
         self.handles[actor_id] = handle
         return restarted
 
@@ -167,27 +179,51 @@ class _ActorRegistry:
     def begin(self, shard_id, execution):
         if shard_id in self.results:
             return {"cached": self.results[shard_id]}
+        if shard_id in self.failed_shards:
+            return {"failed": self.failed_shards[shard_id]}
         attempts = self.attempts.setdefault(shard_id, [])
-        if len(attempts) > self.max_retries:
-            raise RuntimeError(f"Ray shard {shard_id} exhausted its retry limit")
         if attempts:
-            attempts[-1]["status"] = "worker_lost"
+            if attempts[-1]["status"] == "application_failed":
+                raise RuntimeError(f"Cannot retry an application failure: {shard_id}")
+            self._worker_lost(attempts[-1])
+        if len(attempts) > self.max_retries:
+            failed = {
+                "shape_ids": list(execution["shape_ids"]),
+                "reason": "worker_retry_exhausted",
+                "retries": len(attempts) - 1,
+                "execution": dict(attempts[-1]),
+            }
+            self.failed_shards[shard_id] = failed
+            return {"failed": failed}
         attempt = len(attempts) + 1
         attempts.append({**execution, "attempt": attempt, "status": "running"})
         return {"attempt": attempt}
 
     def commit(self, shard_id, result, execution):
         completed = json.loads(execution)
-        if completed["attempt"] != self.attempts[shard_id][-1]["attempt"]:
-            # A partitioned old worker must not overwrite a newer incarnation.
+        if (shard_id in self.failed_shards
+                or completed["attempt"] != self.attempts[shard_id][-1]["attempt"]
+                or (shard_id not in self.results
+                    and self.attempts[shard_id][-1]["status"] != "running")):
             raise RuntimeError(f"Stale Ray shard completion: {shard_id}")
         if shard_id in self.results:
             return
         self.results[shard_id] = {"result_json": result, "execution_json": execution}
         self.attempts[shard_id][-1].update(completed, status="completed")
 
+    def fail(self, shard_id, execution, reason):
+        failed = json.loads(execution)
+        if (shard_id in self.results or shard_id in self.failed_shards
+                or failed["attempt"] != self.attempts[shard_id][-1]["attempt"]
+                or self.attempts[shard_id][-1]["status"] != "running"):
+            raise RuntimeError(f"Stale Ray shard failure: {shard_id}")
+        self.attempts[shard_id][-1].update(failed, status="application_failed", reason=reason)
+
     def progress(self):
-        return {"completed_shard_ids": sorted(self.results), "attempts": self.attempts}
+        return {
+            "completed_shard_ids": sorted(self.results), "attempts": self.attempts,
+            "failed_shards": self.failed_shards,
+        }
 
 
 def _runtime_diagnostics(ray, *, actor=False):
@@ -309,13 +345,30 @@ class _ShardEvaluator:
                     results.append(admission["cached"]["result_json"])
                     executions.append(admission["cached"]["execution_json"])
                     continue
+                if "failed" in admission:
+                    results.append("")
+                    executions.append(json.dumps(admission["failed"]["execution"], allow_nan=False))
+                    continue
                 execution["attempt"] = admission["attempt"]
                 print("[atrex-shard-attempt] " + json.dumps(execution), flush=True)
                 started = time.perf_counter_ns()
-                result = json.dumps(evaluate(config), allow_nan=False)
+                try:
+                    result = json.dumps(evaluate(config), allow_nan=False)
+                except Exception as error:
+                    execution.update(
+                        end_utc_ns=time.time_ns(),
+                        duration_s=(time.perf_counter_ns() - started) / 1_000_000_000,
+                        end_time_source="worker", end_time_estimated=False,
+                    )
+                    ray.get(self.registry.fail.remote(
+                        str(shard_id), json.dumps(execution, allow_nan=False),
+                        f"{type(error).__name__}: {error}"[:1000],
+                    ))
+                    raise
                 execution.update(
                     end_utc_ns=time.time_ns(),
                     duration_s=(time.perf_counter_ns() - started) / 1_000_000_000,
+                    end_time_source="worker", end_time_estimated=False,
                 )
                 encoded_execution = json.dumps(execution, allow_nan=False)
                 # Commit before returning to Data. A replay after object/worker loss
@@ -367,7 +420,7 @@ def _terminate_registry(ray, registry):
 
 
 def evaluate_ray_data(config):
-    """Distribute full-shape local evaluations and return a strict native report."""
+    """Distribute selected shapes and retain explicit exhausted-shard failures."""
     from atrex_bench import AtrexConfigError, AtrexEvaluationError, merge_evaluation_shards
     from atrex_bench._process_guard import WORKER_EXIT_GRACE_S
     from atrex_bench.shards import select_shape_ids
@@ -386,12 +439,12 @@ def evaluate_ray_data(config):
         raise AtrexConfigError(str(error)) from error
     try:
         all_ids = sorted(json.loads((Path(config["reference_dir"]) / "shapes.json").read_text()))
-        # Validate the complete set here; each dataset row selects its own subset.
         all_ids = select_shape_ids(all_ids, all_ids)
+        selected_ids = select_shape_ids(all_ids, config.get("shape_ids"))
     except (OSError, ValueError, TypeError) as error:
         raise AtrexConfigError(f"Invalid Ray shape set: {error}") from error
     size = config.get("ray_shapes_per_shard", 1)
-    shards = [all_ids[index : index + size] for index in range(0, len(all_ids), size)]
+    shards = [selected_ids[index : index + size] for index in range(0, len(selected_ids), size)]
     if not shards:
         raise AtrexConfigError("ray_data requires at least one shape")
     maximum = min(config.get("ray_max_workers", len(shards)), len(shards))
@@ -454,8 +507,9 @@ def evaluate_ray_data(config):
                 min_size=maximum, max_size=maximum, max_tasks_in_flight_per_actor=1
             ),
             fn_constructor_args=(bundle, config, registry),
-            max_restarts=len(shards) * max_retries,
-            max_task_retries=max_retries,
+            max_restarts=len(shards) * (max_retries + 1),
+            # The last delivery records exhaustion without invoking the evaluator.
+            max_task_retries=max_retries + 1,
             **placement,
         )
         results = dataset.take_all()
@@ -464,9 +518,25 @@ def evaluate_ray_data(config):
         if len(results) != len(rows):
             raise AtrexEvaluationError("Duplicate Ray shard results")
         results.sort(key=lambda row: row["shard_id"])
-        merged = merge_evaluation_shards([json.loads(row["result_json"]) for row in results])
-        executions = [json.loads(row["execution_json"]) for row in results]
         progress = ray.get(registry.progress.remote())
+        successful = [row for row in results if row["result_json"]]
+        failed_shards = progress["failed_shards"]
+        if ({row["shard_id"] for row in results if not row["result_json"]} != set(failed_shards)
+                or {row["shard_id"] for row in successful} != set(progress["completed_shard_ids"])):
+            raise AtrexEvaluationError("Ray shard results differ from committed terminal evidence")
+        if not successful:
+            raise AtrexEvaluationError("All Ray evaluation shards failed")
+        failed_shapes = [
+            {"shape_id": shape_id, "reason": failed_shards[row["shard_id"]]["reason"],
+             "retries": failed_shards[row["shard_id"]]["retries"]}
+            for row in rows if row["shard_id"] in failed_shards
+            for shape_id in json.loads(row["shape_ids_json"])
+        ]
+        merged = merge_evaluation_shards(
+            [json.loads(row["result_json"]) for row in successful],
+            shape_ids=selected_ids, failed_shapes=failed_shapes,
+        )
+        executions = [json.loads(row["execution_json"]) for row in results]
     except BaseException as error:
         failure = error
         raise

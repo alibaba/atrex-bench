@@ -2,8 +2,9 @@
 
 Ray distribution is opt-in (`distribution="ray_data"`). The caller provides an
 existing Ray cluster, compatible native dependencies, and a GPU worker budget.
-Shapes become dataset rows, not independent Ray jobs. With N shapes and a worker
-limit K, all N rows are retained while at most K single-GPU actors run them.
+Selected shapes become dataset rows, not independent Ray jobs. With N selected
+shapes and a worker limit K, all rows are retained while at most K single-GPU
+actors run them. Original IDs and the full reference bundle are preserved.
 Local evaluation remains the default and is also the rollback path.
 
 ![Execution architecture: CPU driver, bounded GPU pool, result registry and process cleanup](diagrams/ray-data-execution.png)
@@ -14,10 +15,19 @@ A normal candidate compile, correctness, or performance failure is a reportable
 outcome, not an infrastructure retry. Raised user exceptions fail the distributed
 run. Ray worker/node failures may replay a map task; the registry checks each
 shard before running its harness, reuses committed results, caps attempts, and
-rejects stale completions. Default three retries means four total attempts.
-There is no durable checkpoint or whole-driver recovery.
+rejects stale completions. Default three retries means four harness attempts.
+One additional transport delivery records exhaustion without running the harness.
+Exhausted shards produce explicit `shape_selection.failed_shapes`; successful
+shards and remaining work are retained. All-shard failure or incomplete terminal
+evidence still fails the run. There is no durable checkpoint or whole-driver recovery.
 
-![Shard retry, committed-result reuse, fatal errors and cleanup outcomes](diagrams/ray-data-failures.png)
+Completed and application-failed attempts record worker UTC endpoints and monotonic
+duration. Lost workers cannot report their exact stop time: the registry records an
+observed endpoint with `end_time_source="driver_observed_loss"` and
+`end_time_estimated=true`. This is an upper-bound observation, not measured GPU time;
+billing consumers must not sum it as exact usage.
+
+The [failure-path diagram source](diagrams/ray-data-failures.dot) includes exhausted-shard partial results.
 
 When cleanup itself fails, an existing evaluation or initialization exception
 remains the primary exception and a separate `[atrex-ray-cleanup]` diagnostic is

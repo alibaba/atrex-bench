@@ -1,4 +1,4 @@
-"""Shape filtering and complete report merging without a GPU or network."""
+"""Shape filtering and complete/partial report merging without a GPU or network."""
 
 import copy
 import json
@@ -321,3 +321,304 @@ def test_cli_and_sdk_real_failed_compile_only_selected_ids(evaluator, tmp_path):
     output = completed.stdout.split("[OUTPUT] ")[-1].strip()
     cli_result = json.loads(Path(output).read_text())
     assert list(cli_result["passed"]["compile"]) == ["2"]
+
+
+def _assert_shape_coverage(result, requested, completed, failed):
+    selection = result["shape_selection"]
+    assert selection["all_shape_ids"] == IDS
+    assert selection["selected_shape_ids"] == requested
+    assert selection["partial"] is (requested != IDS or bool(failed))
+    assert result["runner_config"]["shape_ids"] == requested
+    assert set(selection["input_seeds"]) == set(requested)
+    assert selection.get("failed_shapes", []) == failed
+    for stage in ("compile", "correctness", "performance"):
+        assert list(result["passed"][stage]) == completed
+    for stage in ("correctness", "performance"):
+        assert list(result[stage]["shapes"]) == completed
+
+
+@pytest.mark.parametrize("selection", [["31", "10"], "31,10", "@file"])
+@pytest.mark.parametrize("mode", ["full", "correctness_only", "performance_only"])
+def test_explicit_subset_merge_preserves_universe_and_serial_evidence(
+    evaluator, tmp_path, selection, mode
+):
+    evaluate, reference, _, _ = evaluator
+    source = (reference / "shapes.json").read_bytes()
+    full = evaluate(mode=mode)
+    shards = [evaluate([sid], mode=mode) for sid in ("31", "10")]
+    before = copy.deepcopy(shards)
+    if selection == "@file":
+        path = tmp_path / "selected.json"
+        path.write_text('["31", "10"]')
+        selection = "@" + str(path)
+    result = merge_evaluation_shards(shards, shape_ids=selection)
+    requested = ["10", "31"]
+    _assert_shape_coverage(result, requested, requested, [])
+    for stage in ("compile", "correctness", "performance"):
+        assert result["passed"][stage] == {
+            sid: full["passed"][stage][sid] for sid in requested
+        }
+    for stage in ("correctness", "performance"):
+        assert result[stage]["shapes"] == {
+            sid: full[stage]["shapes"][sid] for sid in requested
+        }
+    assert result["shape_selection"]["input_seeds"] == {
+        sid: full["shape_selection"]["input_seeds"][sid] for sid in requested
+    }
+    assert shards == before
+    assert (reference / "shapes.json").read_bytes() == source
+
+
+def test_explicit_full_selection_keeps_default_strict_merge(evaluator):
+    evaluate, _, _, _ = evaluator
+    shards = [evaluate(["10", "31"]), evaluate(["2"])]
+    default = merge_evaluation_shards(shards)
+    explicit = merge_evaluation_shards(shards, shape_ids=list(reversed(IDS)), failed_shapes=[])
+    for key in ("passed", "correctness", "performance", "shape_selection", "runner_config"):
+        assert explicit[key] == default[key]
+    _assert_shape_coverage(explicit, IDS, IDS, [])
+    with pytest.raises(ValueError, match="Missing evaluation shapes"):
+        merge_evaluation_shards(shards[:1])
+
+
+@pytest.mark.parametrize("mode", ["full", "correctness_only", "performance_only"])
+@pytest.mark.parametrize("torch_compile", [False, True])
+@pytest.mark.parametrize("requested", [IDS, ["10", "31"]])
+def test_failed_shapes_account_for_missing_selection_without_fabricating_results(
+    evaluator, mode, torch_compile, requested
+):
+    evaluate, _, _, _ = evaluator
+    full = evaluate(mode=mode, torch_compile=torch_compile)
+    completed = evaluate(["10"], mode=mode, torch_compile=torch_compile)
+    failures = [
+        {"shape_id": sid, "reason": "worker retry budget exhausted", "retries": 3}
+        for sid in requested if sid != "10"
+    ]
+    before = copy.deepcopy(completed)
+    result = merge_evaluation_shards(
+        [completed], shape_ids=requested, failed_shapes=failures
+    )
+    _assert_shape_coverage(result, requested, ["10"], failures)
+    assert result["shape_selection"]["input_seeds"] == {
+        sid: full["shape_selection"]["input_seeds"][sid] for sid in requested
+    }
+    assert result["shard_evaluations"][0]["shape_ids"] == ["10"]
+    assert completed == before
+    json.dumps(result, allow_nan=False)
+
+
+def test_partial_flydsl_ratio_aggregates_only_completed_shape_blocks(evaluator):
+    evaluate, _, _, _ = evaluator
+    shards = [evaluate([sid]) for sid in ('10', '31')]
+    for shard, sid, ratio in zip(shards, ('10', '31'), (.2, .8)):
+        shard['flydsl_compute_ratio'] = {
+            'shapes': {sid: {'ratio': ratio, 'error': None}},
+            'average': ratio, 'valid_shape_count': 1, 'total_shape_count': 1,
+        }
+    result = merge_evaluation_shards(
+        shards, failed_shapes=[{'shape_id': '2', 'reason': 'worker lost', 'retries': 0}]
+    )
+    ratio = result['flydsl_compute_ratio']
+    assert list(ratio['shapes']) == ['10', '31']
+    assert ratio['average'] == pytest.approx(.5)
+    assert ratio['valid_shape_count'] == ratio['total_shape_count'] == 2
+
+
+@pytest.mark.parametrize(
+    "failed",
+    [
+        [],
+        [{"shape_id": "2", "reason": "lost", "retries": 0}],
+        [{"shape_id": "31", "reason": "lost", "retries": 0}],
+        [{"shape_id": "missing", "reason": "lost", "retries": 0}],
+        [{"shape_id": "10", "reason": "lost", "retries": 0}],
+        [{"shape_id": 31, "reason": "lost", "retries": 0}],
+        [{"shape_id": "31", "retries": 0}],
+        [{"reason": "lost", "retries": 0}],
+        [None],
+        ["31"],
+        {"shape_id": "31", "reason": "lost", "retries": 0},
+        [
+            {"shape_id": "31", "reason": "lost", "retries": 0},
+            {"shape_id": "31", "reason": "lost again", "retries": 1},
+        ],
+    ],
+)
+def test_partial_merge_rejects_missing_duplicate_or_malformed_failure_evidence(evaluator, failed):
+    evaluate, _, _, _ = evaluator
+    shard = evaluate(["10"])
+    with pytest.raises(ValueError):
+        merge_evaluation_shards([shard], shape_ids=IDS, failed_shapes=failed)
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        {"shape_id": "31", "reason": "", "retries": 0},
+        {"shape_id": "31", "reason": "   ", "retries": 0},
+        {"shape_id": "31", "reason": None, "retries": 0},
+        {"shape_id": "31", "reason": 1, "retries": 0},
+        {"shape_id": "31", "reason": "lost", "retries": -1},
+        {"shape_id": "31", "reason": "lost", "retries": True},
+        {"shape_id": "31", "reason": "lost", "retries": False},
+        {"shape_id": "31", "reason": "lost", "retries": 1.0},
+        {"shape_id": "31", "reason": "lost", "retries": "1"},
+        {"shape_id": "31", "reason": "lost"},
+    ],
+)
+def test_failure_fields_are_validated_even_when_ids_exactly_cover_missing(evaluator, failure):
+    evaluate, _, _, _ = evaluator
+    with pytest.raises(ValueError):
+        merge_evaluation_shards(
+            [evaluate(["10"])], shape_ids=["10", "31"], failed_shapes=[failure]
+        )
+
+
+@pytest.mark.parametrize("selection", [[], "", ["missing"], [2], ["10", "10"]])
+def test_merge_rejects_invalid_requested_selection(evaluator, selection):
+    evaluate, _, _, _ = evaluator
+    with pytest.raises(ValueError):
+        merge_evaluation_shards([evaluate(["10"])], shape_ids=selection)
+
+
+def test_partial_merge_rejects_completed_or_failed_shapes_outside_request(evaluator):
+    evaluate, _, _, _ = evaluator
+    with pytest.raises(ValueError):
+        merge_evaluation_shards([evaluate(["10", "2"])], shape_ids=["10"])
+    with pytest.raises(ValueError):
+        merge_evaluation_shards(
+            [evaluate(["10"])], shape_ids=["10", "31"],
+            failed_shapes=[
+                {"shape_id": "31", "reason": "lost", "retries": 0},
+                {"shape_id": "2", "reason": "lost", "retries": 0},
+            ],
+        )
+    with pytest.raises(ValueError):
+        merge_evaluation_shards(
+            [evaluate(["10"])], shape_ids=["10"],
+            failed_shapes=[{"shape_id": "10", "reason": "lost", "retries": 0}],
+        )
+    with pytest.raises(ValueError):
+        merge_evaluation_shards(
+            [evaluate(["10"]), evaluate(["10"])], shape_ids=["10"]
+        )
+
+
+def test_all_failed_requires_at_least_one_completed_shard():
+    with pytest.raises(ValueError, match="[Aa]t least one.*shard"):
+        merge_evaluation_shards(
+            [], shape_ids=IDS,
+            failed_shapes=[{"shape_id": sid, "reason": "lost", "retries": 0} for sid in IDS],
+        )
+
+
+def test_partial_merge_can_write_offline_report(evaluator, tmp_path):
+    evaluate, _, _, _ = evaluator
+    path = tmp_path / "completed.json"
+    path.write_text(json.dumps(evaluate(["10"])))
+    output = tmp_path / "partial.json"
+    failures = [{"shape_id": "31", "reason": "lost", "retries": 0}]
+    result = merge_evaluation_shards(
+        [path], output=output, shape_ids=["31", "10"], failed_shapes=failures
+    )
+    assert json.loads(output.read_text()) == result
+    _assert_shape_coverage(result, ["10", "31"], ["10"], failures)
+
+
+@pytest.mark.parametrize(
+    "requested,completed",
+    [(["10", "31"], ["10", "31"]), (IDS, ["10", "31"]), (IDS, ["10"])],
+)
+def test_abba_partial_merge_propagates_selection_failures_and_aggregates_only_completed(
+    evaluator, monkeypatch, requested, completed
+):
+    evaluate, reference, candidate, _ = evaluator
+    baseline = candidate.parent / "baseline.py"
+    baseline.write_bytes(candidate.read_bytes())
+
+    def process(**kwargs):
+        result = evaluate(kwargs["shape_ids"])
+        factor = (int(kwargs["shape_ids"][0]) + 1) if kwargs["input_path"] == baseline else 1
+        for shape in result["performance"]["shapes"].values():
+            shape["samples"][0]["end_to_end_time_ms"] *= factor
+        return result
+
+    monkeypatch.setattr(runner, "_run_eval_process", process)
+    shards = [runner.run_abba_eval(
+        baseline_path=baseline, candidate_path=candidate, reference_dir=reference,
+        output_root=reference.parent / "abba", timestamp="shard-" + sid,
+        shape_ids=[sid], collect_kernel_events=True,
+    ) for sid in completed]
+    expected_runs = [
+        {**step, "result": merge_evaluation_shards(
+            [shard["abba"]["runs"][index]["result"] for shard in shards], shape_ids=completed
+        )}
+        for index, step in enumerate(runner._abba_schedule())
+    ]
+    expected, error = runner._aggregate_abba_runs(expected_runs, completed)
+    assert error is None
+    failures = [
+        {"shape_id": sid, "reason": "worker lost", "retries": 2}
+        for sid in requested if sid not in completed
+    ]
+    result = merge_evaluation_shards(
+        list(reversed(shards)), shape_ids=list(reversed(requested)), failed_shapes=failures
+    )
+    selection = result["shape_selection"]
+    assert selection["all_shape_ids"] == IDS
+    assert selection["selected_shape_ids"] == requested
+    assert selection["partial"] is True
+    assert selection.get("failed_shapes", []) == failures
+    assert result["runner_config"]["shape_ids"] == requested
+    assert result["passed"]["abba"]["status"] == "passed"
+    for key in ("baseline", "candidate", "comparison"):
+        assert result["abba"][key] == expected[key]
+    assert list(result["abba"]["comparison"]["shapes"]) == completed
+    for row in result["abba"]["runs"]:
+        _assert_shape_coverage(row["result"], requested, completed, failures)
+        assert set(row["result"]["shape_selection"]["input_seeds"]) == set(requested)
+
+
+@pytest.mark.parametrize("field", [
+    "source_hashes", "evaluator_version", "evaluator_sha256", "seed_policy",
+])
+@pytest.mark.parametrize("partial", [False, True])
+def test_merging_rejects_missing_provenance_even_when_every_shard_omits_it(
+    evaluator, field, partial
+):
+    evaluate, _, _, _ = evaluator
+    reports = [evaluate([sid]) for sid in (IDS if not partial else ["10"])]
+    for report in reports:
+        report["shape_selection"].pop(field)
+    with pytest.raises(ValueError, match="Missing immutable shard provenance"):
+        merge_evaluation_shards(reports, shape_ids=["10"] if partial else None)
+
+
+@pytest.mark.parametrize("mutation", [
+    "candidate_hash", "reference_hash", "evaluator_version", "evaluator_sha256",
+    "extra_run", "missing_run",
+])
+def test_abba_merge_rejects_mixed_revisions_and_unreported_executions(
+    evaluator, monkeypatch, mutation
+):
+    evaluate, reference, candidate, _ = evaluator
+    monkeypatch.setattr(runner, "_run_eval_process",
+                        lambda **kwargs: evaluate(kwargs["shape_ids"]))
+    report = runner.run_abba_eval(
+        baseline_path=candidate, candidate_path=candidate, reference_dir=reference,
+        output_root=reference.parent / "abba", timestamp="provenance", shape_ids=["10"],
+    )
+    if mutation == "extra_run":
+        report["abba"]["runs"].append(copy.deepcopy(report["abba"]["runs"][-1]))
+        report["abba"]["runs"][-1]["result"]["error"] = "unreported execution failure"
+    elif mutation == "missing_run":
+        report["abba"]["runs"].pop()
+    else:
+        selection = report["abba"]["runs"][2]["result"]["shape_selection"]
+        if mutation.endswith("_hash"):
+            key = "candidate.py" if mutation == "candidate_hash" else "reference.py"
+            selection["source_hashes"][key] += "different"
+        else:
+            selection[mutation] += "different"
+    with pytest.raises(ValueError, match="Incompatible ABBA"):
+        merge_evaluation_shards([report], shape_ids=["10"])
