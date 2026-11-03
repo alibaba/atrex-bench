@@ -67,6 +67,7 @@ class OutputTolerance:
     rtol: float
     max_mismatch_fraction: float = 0.0
     max_rel_l2: float | None = None
+    relative_to: str = "candidate"
 
 
 @dataclass(frozen=True)
@@ -270,6 +271,7 @@ def _compare_output_tensors(
     metadata_correctness: bool = False,
     max_mismatch_fraction: float = 0.0,
     max_rel_l2_bound: float | None = None,
+    relative_to: str = "candidate",
     defined_mask: torch.Tensor | None = None,
     mutation_before: torch.Tensor | None = None,
 ) -> OutputDiff:
@@ -388,9 +390,8 @@ def _compare_output_tensors(
                     max_elementwise_rel_diff,
                     (abs_diff / denominator).max().item(),
                 )
-            # Preserve the historical torch.allclose(reference, candidate)
-            # argument direction: the relative term scales with candidate.
-            mismatched += int((abs_diff > atol + rtol * candidate_float.abs()).sum().item())
+            relative_tensor = reference_float if relative_to == "reference" else candidate_float
+            mismatched += int((abs_diff > atol + rtol * relative_tensor.abs()).sum().item())
         if not ref_is_finite or not cand_is_finite:
             return OutputDiff(
                 name=name,
@@ -443,7 +444,7 @@ def _compare_output_tensors(
             "rtol": rtol,
             "max_mismatch_fraction": max_mismatch_fraction,
             "max_rel_l2": max_rel_l2_bound,
-            "relative_to": "candidate",
+            "relative_to": relative_to,
             "mode": (
                 "exact"
                 if relative_l2 is None
@@ -563,6 +564,7 @@ def _compare_value_trees(
                 tolerance.max_mismatch_fraction if tolerance is not None else 0.0
             ),
             max_rel_l2_bound=(tolerance.max_rel_l2 if tolerance is not None else None),
+            relative_to=(tolerance.relative_to if tolerance is not None else "candidate"),
         )
     ]
 
@@ -611,7 +613,7 @@ def _load_output_tolerance_contract(reference_path: Path) -> dict[str, OutputTol
         if not isinstance(raw_policy, dict):
             raise TypeError(f"correctness_tolerances[{raw_path!r}] must be an object")
         unknown = sorted(
-            set(raw_policy) - {"atol", "rtol", "max_mismatch_fraction", "max_rel_l2"}
+            set(raw_policy) - {"atol", "rtol", "max_mismatch_fraction", "max_rel_l2", "relative_to"}
         )
         if unknown:
             raise ValueError(
@@ -646,11 +648,15 @@ def _load_output_tolerance_contract(reference_path: Path) -> dict[str, OutputTol
                 f"correctness_tolerances[{raw_path!r}].max_rel_l2 "
                 "must be finite and non-negative"
             )
+        relative_to = raw_policy.get("relative_to", "candidate")
+        if relative_to not in ("reference", "candidate"):
+            raise ValueError("relative_to must be reference or candidate")
         tolerances[raw_path] = OutputTolerance(
             atol=tensor_atol,
             rtol=tensor_rtol,
             max_mismatch_fraction=mismatch_fraction,
             max_rel_l2=tensor_max_rel_l2,
+            relative_to=relative_to,
         )
     return tolerances
 

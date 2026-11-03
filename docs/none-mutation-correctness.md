@@ -70,11 +70,14 @@ misspelled paths fail evaluation. Every policy requires `atol` and `rtol`; omitt
 `max_mismatch_fraction` means zero and omitted `max_rel_l2` means no additional
 L2 bound. Fractions use units of one: **0.001 means 0.1%, not 0.001%**.
 
-For each tensor the elementwise condition preserves the historical
-`torch.allclose(reference, candidate)` direction:
+The optional `relative_to` field selects the tensor used in the elementwise
+relative term: `"candidate"` (default) preserves the historical
+`torch.allclose(reference, candidate)` direction; `"reference"` uses the baseline.
+No other values are accepted. For each tensor:
 
 ```
-bad = abs(candidate - reference) > atol + rtol * abs(candidate)
+scale = reference if relative_to == "reference" else candidate
+bad = abs(candidate - reference) > atol + rtol * abs(scale)
 sum(bad) <= floor(max_mismatch_fraction * tensor.numel())
 ```
 
