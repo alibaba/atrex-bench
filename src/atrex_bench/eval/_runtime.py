@@ -549,6 +549,10 @@ def clone_value(value: Any, _storages: dict | None = None) -> Any:
         return tuple(clone_value(item, _storages) for item in value)
     if isinstance(value, dict):
         return {key: clone_value(item, _storages) for key, item in value.items()}
+    # Communicators are evaluator-owned handles, not tensor inputs. Deepcopy
+    # cannot pickle ProcessGroup and must not create a second communication domain.
+    if torch.distributed.is_available() and isinstance(value, torch.distributed.ProcessGroup):
+        return value
     return copy.deepcopy(value)
 
 
