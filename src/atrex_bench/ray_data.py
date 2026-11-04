@@ -360,10 +360,17 @@ class _ShardEvaluator:
                         duration_s=(time.perf_counter_ns() - started) / 1_000_000_000,
                         end_time_source="worker", end_time_estimated=False,
                     )
-                    ray.get(self.registry.fail.remote(
-                        str(shard_id), json.dumps(execution, allow_nan=False),
-                        f"{type(error).__name__}: {error}"[:1000],
-                    ))
+                    try:
+                        ray.get(self.registry.fail.remote(
+                            str(shard_id), json.dumps(execution, allow_nan=False),
+                            f"{type(error).__name__}: {error}"[:1000],
+                        ))
+                    except Exception as registry_error:
+                        print(
+                            f"[atrex-ray-registry] {type(registry_error).__name__}: "
+                            f"{registry_error}",
+                            file=sys.stderr,
+                        )
                     raise
                 execution.update(
                     end_utc_ns=time.time_ns(),

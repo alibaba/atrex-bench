@@ -27,7 +27,10 @@ observed endpoint with `end_time_source="driver_observed_loss"` and
 `end_time_estimated=true`. This is an upper-bound observation, not measured GPU time;
 billing consumers must not sum it as exact usage.
 
-The [failure-path diagram source](diagrams/ray-data-failures.dot) includes exhausted-shard partial results.
+![Shard retries, exhausted-shard partial results, fatal errors and cleanup outcomes](diagrams/ray-data-failures.png)
+
+If recording an application failure in the registry fails, the application exception
+remains primary and a separate `[atrex-ray-registry]` diagnostic is written to stderr.
 
 When cleanup itself fails, an existing evaluation or initialization exception
 remains the primary exception and a separate `[atrex-ray-cleanup]` diagnostic is
@@ -41,12 +44,12 @@ This is process lifecycle management, not isolation from hostile candidate code.
 | Diagram component | Implementation |
 |---|---|
 | Driver setup, dataset, bounded pool, cleanup scope | [`evaluate_ray_data`](../src/atrex_bench/ray_data.py) |
-| Per-shard attempts, cached results, stale-attempt fencing | [`_ActorRegistry.begin` / `commit`](../src/atrex_bench/ray_data.py) |
+| Attempts, cached results, exhaustion tombstones, application failures and stale-attempt fencing | [`_ActorRegistry.register` / `begin` / `commit` / `fail`](../src/atrex_bench/ray_data.py) |
 | Source bootstrap and fresh local evaluation | [`_ShardEvaluator.__init__` / `__call__`](../src/atrex_bench/ray_data.py) |
 | Actor termination confirmation | [`_drain_actors`, `_terminate_registry`, `_wait_actor_terminated`](../src/atrex_bench/ray_data.py) |
 | Lifetime pipe, signal propagation and descendant watchdog | [`supervised_popen` / `main`](../src/atrex_bench/_process_guard.py) |
 | Local CLI and isolated subworker stages | [`run_eval.py`](../src/atrex_bench/cli/run_eval.py) |
-| Complete coverage and compatible report validation | [`merge_evaluation_shards`](../src/atrex_bench/shards.py) |
+| Requested-selection coverage with explicit failure evidence and compatible report validation | [`merge_evaluation_shards`](../src/atrex_bench/shards.py) |
 
 The registry is unnamed and passed by actor handle; sharing a Ray namespace does
 not require claiming a fixed actor name. Independent drivers still have separate

@@ -1375,8 +1375,9 @@ def test_register_closes_only_running_attempts_of_restarted_actor(fake_ray, monk
 
 
 @pytest.mark.parametrize('error_kind', ['value', 'ray_actor'])
+@pytest.mark.parametrize('report_failure', [None, 'stale_remote', 'registry_lost_get'])
 def test_worker_records_application_failure_without_turning_it_into_transport_retry(
-    fake_ray, monkeypatch, tmp_path, error_kind
+    fake_ray, monkeypatch, tmp_path, capsys, error_kind, report_failure
 ):
     from atrex_bench import sdk
 
@@ -1397,6 +1398,24 @@ def test_worker_records_application_failure_without_turning_it_into_transport_re
         raise error
 
     monkeypatch.setattr('atrex_bench.evaluate', run)
+    if report_failure:
+        token = object()
+        secondary = (RuntimeError('Stale Ray shard failure') if report_failure == 'stale_remote'
+                     else ray.exceptions.RayActorError('registry lost'))
+        original_get = ray.get
+
+        def fail(*args):
+            if report_failure == 'stale_remote':
+                raise secondary
+            return token
+
+        def get(value, **kwargs):
+            if value is token:
+                raise secondary
+            return original_get(value, **kwargs)
+
+        monkeypatch.setattr(registry, 'fail', fail)
+        monkeypatch.setattr(ray, 'get', get)
     utc = iter([100, 200])
     monotonic = iter([1_000_000_000, 1_500_000_000])
     monkeypatch.setattr(adapter.time, 'time_ns', lambda: next(utc))
@@ -1407,13 +1426,19 @@ def test_worker_records_application_failure_without_turning_it_into_transport_re
         assert caught.value is error
         assert calls == [['10', '31']]
         execution = registry.progress()['attempts']['shape'][0]
-        assert execution['status'] == 'application_failed'
         assert execution['start_utc_ns'] == 100
-        assert execution['end_utc_ns'] == 200
-        assert execution['duration_s'] == .5
-        assert execution['end_time_estimated'] is False
-        assert execution['end_time_source'] == 'worker'
-        assert 'application error' in execution['reason']
+        if report_failure:
+            assert execution['status'] == 'running'
+            diagnostic = capsys.readouterr().err
+            assert '[atrex-ray-registry]' in diagnostic
+            assert str(secondary) in diagnostic
+        else:
+            assert execution['status'] == 'application_failed'
+            assert execution['end_utc_ns'] == 200
+            assert execution['duration_s'] == .5
+            assert execution['end_time_estimated'] is False
+            assert execution['end_time_source'] == 'worker'
+            assert 'application error' in execution['reason']
         assert sdk._start_process is original_start
         assert LIFETIME_FD_ENV not in os.environ
     finally:
