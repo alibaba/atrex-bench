@@ -29,7 +29,11 @@ handles = []
 current = None
 class RayActorError(Exception): pass
 class GetTimeoutError(Exception): pass
-exceptions = types.SimpleNamespace(RayActorError=RayActorError, GetTimeoutError=GetTimeoutError)
+class ActorUnavailableError(RayActorError): pass
+# Process loss cannot report an application exception.
+class WorkerLost(BaseException): pass
+exceptions = types.SimpleNamespace(RayActorError=RayActorError, GetTimeoutError=GetTimeoutError,
+                                  ActorUnavailableError=ActorUnavailableError)
 pickle_registry = set()
 cloudpickle = types.SimpleNamespace(
     register_pickle_by_value=lambda m: pickle_registry.add(m.__name__),
@@ -78,7 +82,11 @@ import os
 import ray
 last_options = None
 last_rows = None
+last_results = None
+deliveries = {}
 mutation = None
+unavailable_before_admission = 0
+unavailable_before_tombstone = 0
 class DataContext:
     actor_task_retry_on_errors = False
     retried_map_errors = False
@@ -95,6 +103,7 @@ class Dataset:
         self.cls, self.options = cls, kwargs
         return self
     def take_all(self):
+        global last_results
         count = self.options["compute"].options["min_size"]
         actors = []
         for index in range(count):
@@ -108,14 +117,30 @@ class Dataset:
             os.environ["CUDA_VISIBLE_DEVICES"] = "0"
             for index, row in enumerate(self.rows):
                 ray.current, actor = actors[index % count]
+                lost_attempts = unavailable_attempts = 0
+                retries = self.options["fn_constructor_args"][1].get("ray_max_shard_retries", 3)
+                harness_limit = retries + 1
                 for attempt in range(self.options["max_task_retries"] + 1):
+                    deliveries[row["shard_id"]] = deliveries.get(row["shard_id"], 0) + 1
+                    if attempt < unavailable_before_admission:
+                        if attempt == self.options["max_task_retries"]:
+                            raise ray.exceptions.ActorUnavailableError("temporary actor RPC loss")
+                        continue
+                    if (lost_attempts == harness_limit
+                            and unavailable_attempts < unavailable_before_tombstone):
+                        unavailable_attempts += 1
+                        if attempt == self.options["max_task_retries"]:
+                            raise ray.exceptions.ActorUnavailableError("temporary actor RPC loss")
+                        continue
                     try:
                         out = actor({key: [value] for key,value in row.items()})
-                        if mutation == "lost_reply" and attempt == 0:
-                            raise ray.exceptions.RayActorError("lost worker reply")
+                        if mutation == "lost_reply" and attempt == unavailable_before_admission:
+                            raise ray.WorkerLost("lost worker reply")
                         break
-                    except ray.exceptions.RayActorError:
-                        if attempt == self.options["max_task_retries"]: raise
+                    except ray.WorkerLost as error:
+                        lost_attempts += 1
+                        if attempt == self.options["max_task_retries"]:
+                            raise ray.exceptions.RayActorError(str(error)) from error
                         actor.__del__()
                         actor = self.cls(*self.options["fn_constructor_args"])
                         ray.current.value = actor
@@ -128,7 +153,10 @@ class Dataset:
         if mutation == "missing": results.pop()
         if mutation == "duplicate": results.append(results[0])
         if mutation == "exception": raise RuntimeError("worker lost")
-        return list(reversed(results))
+        if mutation == "empty_success": results[-1]["result_json"] = ""
+        if mutation == "fake_success": results[0]["result_json"] = '{"fake": true}'
+        last_results = list(reversed(results))
+        return last_results
 def from_items(rows, override_num_blocks):
     global last_rows
     last_rows = rows
@@ -189,7 +217,6 @@ def config_for(reference, candidate, output, **overrides):
         {"ray_resources": {"worker": float("nan")}},
         {"ray_node_selector": {"x": 1}},
         {"ray_namespace": ""},
-        {"shape_ids": ["10"]},
         {"clock_lock_device": "0"},
         {"checkpoint_dir": "/driver/checkpoints"},
     ],
@@ -344,9 +371,11 @@ def test_retained_diagnostics_keep_each_shard_identity_and_monotonic_duration(
         assert row["cuda_visible_devices"] == "0"
         assert row["pid"] == os.getpid()
         assert row["python_executable"] == sys.executable
+        assert row["end_time_estimated"] is False
+        assert row["end_time_source"] == "worker"
         assert set(row) == set(driver) | {
             "actor_id", "shard_id", "shape_ids", "start_utc_ns", "end_utc_ns",
-            "duration_s", "attempt"
+            "duration_s", "attempt", "end_time_estimated", "end_time_source"
         }
     # Fake actors run serially in this test. Retained identities/times do not
     # manufacture a claim of overlapping GPU execution.
@@ -731,9 +760,17 @@ def test_incompatible_worker_environment_fails_merge(evaluator, fake_ray, monkey
     assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
 
 
-def test_sdk_to_cli_distributed_failure_payload_and_pointer(evaluator, fake_ray, tmp_path):
+@pytest.mark.parametrize('selection', [None, ['31', '10'], '31,10', '@file'])
+def test_sdk_to_cli_distributed_failure_payload_and_pointer(
+    evaluator, fake_ray, tmp_path, selection
+):
     _, reference, candidate, _ = evaluator
     candidate.write_text("def syntax_error(\n")
+    requested = IDS if selection is None else ['10', '31']
+    if selection == '@file':
+        path = tmp_path / 'selected.txt'
+        path.write_text('31\n10\n')
+        selection = '@' + str(path)
     result = evaluate(
         config_for(
             reference,
@@ -741,16 +778,21 @@ def test_sdk_to_cli_distributed_failure_payload_and_pointer(evaluator, fake_ray,
             tmp_path / "real",
             validation_mode="correctness_only",
             ray_shapes_per_shard=2,
+            shape_ids=selection,
         )
     )
-    assert list(result["passed"]["compile"]) == IDS
+    assert list(result["passed"]["compile"]) == requested
     assert all(row["status"] == "failed" for row in result["passed"]["compile"].values())
-    assert result["shape_selection"]["partial"] is False
-    assert result["distribution"]["shard_count"] == 2
+    assert result["shape_selection"]["all_shape_ids"] == IDS
+    assert result["shape_selection"]["selected_shape_ids"] == requested
+    assert result["shape_selection"]["partial"] is (selection is not None)
+    assert result["distribution"]["shard_count"] == (2 if selection is None else 1)
     assert result["distribution"]["driver"]["job_id"] == "job-1"
     assert result["distribution"]["driver"]["assigned_gpu_ids"] == []
     rows = result["distribution"]["shards"]
-    assert [row["shape_ids"] for row in rows] == [["10", "2"], ["31"]]
+    assert [row["shape_ids"] for row in rows] == (
+        [["10", "2"], ["31"]] if selection is None else [requested]
+    )
     assert {row["actor_id"] for row in rows} == set(result["distribution"]["worker_actor_ids"])
     assert all(row["assigned_gpu_ids"] == ["0"] and row["duration_s"] >= 0
                and row["end_utc_ns"] >= row["start_utc_ns"] for row in rows)
@@ -899,37 +941,42 @@ def test_actor_lifetime_janitor_removes_private_sources(tmp_path):
             janitor.wait()
 
 
-def _retry_fixture(tmp_path, monkeypatch):
-    reference = tmp_path / 'retry_reference'
-    reference.mkdir()
-    (reference / 'shapes.json').write_text(json.dumps({str(i): {} for i in range(20)}))
-    candidate = tmp_path / 'retry_candidate.py'
-    candidate.write_text('class Model: pass\n')
+def _retry_fixture(evaluator, tmp_path, monkeypatch):
+    _, reference, candidate, _ = evaluator
+    shape = next(iter(json.loads((reference / 'shapes.json').read_text()).values()))
+    (reference / 'shapes.json').write_text(json.dumps({str(i): shape for i in range(20)}))
     monkeypatch.setattr(adapter, '_start_directory_janitor', lambda *args: None)
     monkeypatch.setattr(adapter.time, 'sleep', lambda seconds: None)
-    monkeypatch.setattr('atrex_bench.merge_evaluation_shards', lambda rows: {'rows': rows})
+    # Keep the real merger: a stub would miss omitted shards, failure coverage,
+    # requested subsets, and synthetic successful results for exhausted workers.
     return config_for(reference, candidate, tmp_path / 'output', ray_shapes_per_shard=1)
 
 
 @pytest.mark.parametrize('failures', [1, 3])
-def test_only_ten_lost_workers_retry_in_twenty_shards(fake_ray, monkeypatch, tmp_path, failures):
+def test_only_ten_lost_workers_retry_in_twenty_shards(
+    evaluator, fake_ray, monkeypatch, tmp_path, failures
+):
     from collections import Counter
 
+    local, _, _, _ = evaluator
     ray, _ = fake_ray
-    config = _retry_fixture(tmp_path, monkeypatch)
+    config = _retry_fixture(evaluator, tmp_path, monkeypatch)
     calls = Counter()
 
     def run(config):
         sid = config['shape_ids'][0]
         calls[sid] += 1
         if int(sid) < 10 and calls[sid] <= failures:
-            raise ray.exceptions.RayActorError('injected worker loss')
-        return {'shape_id': sid}
+            raise ray.WorkerLost('injected worker loss')
+        return local(config['shape_ids'], mode='performance_only')
 
     monkeypatch.setattr('atrex_bench.evaluate', run)
     result = adapter.evaluate_ray_data(config)
-    assert len(result['rows']) == 20
-    assert set(row['shape_id'] for row in result['rows']) == set(map(str, range(20)))
+    ids = sorted(map(str, range(20)))
+    assert result['shape_selection']['all_shape_ids'] == ids
+    assert result['shape_selection']['selected_shape_ids'] == ids
+    assert result['shape_selection']['partial'] is False
+    assert list(result['performance']['shapes']) == ids
     assert sum(calls.values()) == 20 + 10 * failures
     assert all(calls[str(i)] == (failures + 1 if i < 10 else 1) for i in range(20))
     attempts = result['distribution']['shard_attempts']
@@ -938,55 +985,214 @@ def test_only_ten_lost_workers_retry_in_twenty_shards(fake_ray, monkeypatch, tmp
     assert lost == 10 * failures
     assert len(result['distribution']['worker_actor_ids']) == 2
     assert ray.data.last_options['num_gpus'] == 1
-    assert ray.data.last_options['max_task_retries'] == 3
-    assert ray.data.last_options['max_restarts'] == 60
+    assert ray.data.last_options['max_task_retries'] == 8
+    assert ray.data.last_options['max_restarts'] == 160
     assert result['distribution']['max_shard_retries'] == 3
+    for rows in attempts.values():
+        assert [row['attempt'] for row in rows] == list(range(1, len(rows) + 1))
+        for row in rows:
+            assert row['end_utc_ns'] >= row['start_utc_ns']
+            assert row['duration_s'] >= 0
+            assert row['end_time_estimated'] is (row['status'] == 'worker_lost')
+            assert row['end_time_source'] == (
+                'driver_observed_loss' if row['status'] == 'worker_lost' else 'worker'
+            )
     assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
 
 
-def test_committed_shards_survive_lost_worker_replies(fake_ray, monkeypatch, tmp_path):
+@pytest.mark.parametrize('unavailable', [0, 4])
+def test_committed_shards_survive_lost_worker_replies(
+    evaluator, fake_ray, monkeypatch, tmp_path, unavailable
+):
     from collections import Counter
 
+    local, _, _, _ = evaluator
     ray, _ = fake_ray
-    config = _retry_fixture(tmp_path, monkeypatch)
+    config = _retry_fixture(evaluator, tmp_path, monkeypatch)
     calls = Counter()
 
     def run(config):
         sid = config['shape_ids'][0]
         calls[sid] += 1
-        return {'shape_id': sid}
+        return local(config['shape_ids'], mode='performance_only')
 
     ray.data.mutation = 'lost_reply'
+    ray.data.unavailable_before_admission = unavailable
     monkeypatch.setattr('atrex_bench.evaluate', run)
     result = adapter.evaluate_ray_data(config)
-    assert len(result['rows']) == 20
+    assert len(result['performance']['shapes']) == 20
     assert len(calls) == 20 and set(calls.values()) == {1}
     assert sum(len(rows) for rows in result['distribution']['shard_attempts'].values()) == 20
     assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
 
 
 @pytest.mark.parametrize('retries', [None, 0, 1, 2, 3])
-def test_worker_retry_exhaustion_is_bounded_and_drains(fake_ray, monkeypatch, tmp_path, retries):
+def test_worker_retry_exhaustion_is_bounded_and_later_shards_complete(
+    evaluator, fake_ray, monkeypatch, tmp_path, retries
+):
+    from collections import Counter
+
+    local, _, _, _ = evaluator
     ray, _ = fake_ray
-    config = _retry_fixture(tmp_path, monkeypatch)
+    config = _retry_fixture(evaluator, tmp_path, monkeypatch)
     if retries is not None:
         config['ray_max_shard_retries'] = retries
-    calls = []
+    limit = 3 if retries is None else retries
+    calls = Counter()
+    ids = sorted(map(str, range(20)))
+    failed_ids = ids[:10]
+    completed_ids = ids[10:]
 
     def run(config):
-        calls.append(config['shape_ids'])
-        raise ray.exceptions.RayActorError('worker unavailable')
+        sid = config['shape_ids'][0]
+        calls[sid] += 1
+        if sid in failed_ids:
+            raise ray.WorkerLost('worker unavailable')
+        return local(config['shape_ids'], mode='performance_only')
 
     monkeypatch.setattr('atrex_bench.evaluate', run)
-    with pytest.raises(ray.exceptions.RayActorError):
-        adapter.evaluate_ray_data(config)
-    assert len(calls) == (3 if retries is None else retries) + 1
+    result = adapter.evaluate_ray_data(config)
+    selection = result['shape_selection']
+    assert selection['all_shape_ids'] == ids
+    assert selection['selected_shape_ids'] == ids
+    assert selection['partial'] is True
+    failures = selection['failed_shapes']
+    assert [failure['shape_id'] for failure in failures] == failed_ids
+    assert all(failure['reason'].strip() and failure['retries'] == limit for failure in failures)
+    assert all(calls[sid] == limit + 1 for sid in failed_ids)
+    assert all(calls[sid] == 1 for sid in completed_ids)
+    assert set(selection['input_seeds']) == set(ids)
+    for stage in ('compile', 'correctness', 'performance'):
+        assert list(result['passed'][stage]) == completed_ids
+    for stage in ('correctness', 'performance'):
+        assert list(result[stage]['shapes']) == completed_ids
+    assert ray.data.last_options['max_task_retries'] == 2 * (limit + 1)
+    assert ray.data.last_options['max_restarts'] == 40 * (limit + 1)
+    for index, row in enumerate(sorted(ray.data.last_results, key=lambda row: row['shard_id'])):
+        sid = ids[index]
+        attempts = result['distribution']['shard_attempts'][row['shard_id']]
+        assert len(attempts) == (limit + 1 if sid in failed_ids else 1)
+        if sid in failed_ids:
+            assert row['result_json'] == ''
+            assert ray.data.deliveries[row['shard_id']] == limit + 2
+            assert all(attempt['status'] == 'worker_lost' for attempt in attempts)
+            assert all(attempt['end_time_estimated'] is True for attempt in attempts)
+            assert all(attempt['end_time_source'] == 'driver_observed_loss' for attempt in attempts)
+        else:
+            assert json.loads(row['result_json'])['shape_selection']['selected_shape_ids'] == [sid]
+            assert attempts[0]['status'] == 'completed'
     assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
 
 
-def test_application_error_is_not_retried_and_context_is_restored(fake_ray, monkeypatch, tmp_path):
+@pytest.mark.parametrize('retries', [0, 1, 3])
+@pytest.mark.parametrize('all_failed', [False, True])
+@pytest.mark.parametrize('phase', ['before_admission', 'before_tombstone'])
+def test_transport_failures_do_not_consume_shard_harness_budget(
+    evaluator, fake_ray, monkeypatch, tmp_path, retries, all_failed, phase
+):
+    from collections import Counter
+
+    local, _, _, _ = evaluator
     ray, _ = fake_ray
-    config = _retry_fixture(tmp_path, monkeypatch)
+    config = _retry_fixture(evaluator, tmp_path, monkeypatch)
+    config['ray_max_shard_retries'] = retries
+    setattr(ray.data, 'unavailable_' + phase, retries + 1)
+    calls = Counter()
+
+    def run(config):
+        sid = config['shape_ids'][0]
+        calls[sid] += 1
+        if all_failed or sid != '19':
+            raise ray.WorkerLost('injected worker process loss')
+        return local([sid], mode='performance_only')
+
+    monkeypatch.setattr('atrex_bench.evaluate', run)
+    if all_failed:
+        with pytest.raises(RuntimeError, match='All Ray evaluation shards failed'):
+            adapter.evaluate_ray_data(config)
+    else:
+        result = adapter.evaluate_ray_data(config)
+        assert set(result['passed']['compile']) == {'19'}
+        assert len(result['shape_selection']['failed_shapes']) == 19
+        assert all(failure['retries'] == retries
+                   for failure in result['shape_selection']['failed_shapes'])
+    assert calls['19'] == (retries + 1 if all_failed else 1)
+    assert all(count == retries + 1 for sid, count in calls.items() if all_failed or sid != '19')
+    assert len(ray.data.last_results) == 20
+    successful_deliveries = retries + 2 if phase == 'before_admission' else 1
+    assert all(ray.data.deliveries[row['shard_id']] == (
+        2 * (retries + 1) + 1 if not row['result_json'] else successful_deliveries
+    ) for row in ray.data.last_results)
+    assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
+
+
+def test_persistent_transport_failure_remains_bounded(evaluator, fake_ray, monkeypatch, tmp_path):
+    ray, _ = fake_ray
+    config = _retry_fixture(evaluator, tmp_path, monkeypatch)
+    calls = []
+    monkeypatch.setattr('atrex_bench.evaluate', lambda config: calls.append(config))
+    ray.data.unavailable_before_admission = 100
+    with pytest.raises(ray.exceptions.ActorUnavailableError, match='temporary actor RPC loss'):
+        adapter.evaluate_ray_data(config)
+    assert calls == []
+    assert list(ray.data.deliveries.values()) == [ray.data.last_options['max_task_retries'] + 1]
+    assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
+
+
+def test_persistent_recovery_rpc_failure_does_not_rerun_the_harness(
+    evaluator, fake_ray, monkeypatch, tmp_path
+):
+    from collections import Counter
+
+    ray, _ = fake_ray
+    config = _retry_fixture(evaluator, tmp_path, monkeypatch)
+    ray.data.unavailable_before_tombstone = 100
+    calls = Counter()
+
+    def run(config):
+        calls[config['shape_ids'][0]] += 1
+        raise ray.WorkerLost('worker process loss')
+
+    monkeypatch.setattr('atrex_bench.evaluate', run)
+    with pytest.raises(ray.exceptions.ActorUnavailableError, match='temporary actor RPC loss'):
+        adapter.evaluate_ray_data(config)
+    assert list(calls.values()) == [4]
+    assert list(ray.data.deliveries.values()) == [9]
+    assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
+
+
+@pytest.mark.parametrize('retries', [0, 3])
+def test_all_exhausted_shards_raise_after_accounting_for_every_shape(
+    evaluator, fake_ray, monkeypatch, tmp_path, retries
+):
+    from collections import Counter
+
+    ray, _ = fake_ray
+    config = _retry_fixture(evaluator, tmp_path, monkeypatch)
+    config['ray_max_shard_retries'] = retries
+    calls = Counter()
+
+    def run(config):
+        calls[config['shape_ids'][0]] += 1
+        raise ray.WorkerLost('worker unavailable')
+
+    monkeypatch.setattr('atrex_bench.evaluate', run)
+    with pytest.raises((RuntimeError, ValueError), match='All Ray evaluation shards failed'):
+        adapter.evaluate_ray_data(config)
+    assert len(calls) == 20 and set(calls.values()) == {retries + 1}
+    assert len(ray.data.last_results) == 20
+    assert all(row['result_json'] == '' for row in ray.data.last_results)
+    assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
+
+
+def test_application_error_is_not_retried_and_context_is_restored(
+    evaluator, fake_ray, monkeypatch, tmp_path
+):
+    from atrex_bench import sdk
+
+    ray, _ = fake_ray
+    config = _retry_fixture(evaluator, tmp_path, monkeypatch)
+    original_start = sdk._start_process
     calls = []
     context = ray.data.DataContext.get_current()
     context.actor_task_retry_on_errors = True
@@ -1007,6 +1213,27 @@ def test_application_error_is_not_retried_and_context_is_restored(fake_ray, monk
     assert context.actor_task_retry_on_errors is True
     assert context.retried_map_errors is True
     assert context.max_errored_blocks == 100
+    assert sdk._start_process is original_start
+    assert LIFETIME_FD_ENV not in os.environ
+    assert not ray.cloudpickle.list_registry_pickle_by_value()
+    registry = next(handle.value for handle in ray.handles
+                    if isinstance(handle.value, adapter._ActorRegistry))
+    progress = registry.progress()
+    assert progress['completed_shard_ids'] == []
+    attempts = list(progress['attempts'].values())
+    assert len(attempts) == 1 and len(attempts[0]) == 1
+    execution = attempts[0][0]
+    assert execution['status'] == 'application_failed'
+    assert execution['end_utc_ns'] >= execution['start_utc_ns']
+    assert execution['duration_s'] >= 0
+    assert execution['end_time_estimated'] is False
+    assert execution['end_time_source'] == 'worker'
+    assert 'candidate/config error' in execution['reason']
+    with pytest.raises(RuntimeError, match='Cannot retry an application failure'):
+        registry.begin('shape-000000', {})
+    with pytest.raises(RuntimeError, match='Stale Ray shard completion'):
+        registry.commit('shape-000000', '{}', json.dumps({'attempt': 1}))
+    assert registry.progress() == progress
     assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
 
 
@@ -1018,9 +1245,28 @@ def test_registry_bounds_retries_even_if_a_map_bundle_is_replayed(retries):
     )
     limit = 3 if retries is None else retries
     for attempt in range(1, limit + 2):
-        assert registry.begin('failed', {}) == {'attempt': attempt}
-    with pytest.raises(RuntimeError, match='retry limit'):
-        registry.begin('failed', {})
+        assert registry.begin('failed', {
+            'shard_id': 'failed', 'shape_ids': ['10', '31'], 'actor_id': 'actor-1',
+            'start_utc_ns': time.time_ns(),
+        }) == {'attempt': attempt}
+    terminal = registry.begin('failed', {'shape_ids': ['10', '31']})
+    assert set(terminal) == {'failed'}
+    assert terminal['failed']['reason'].strip()
+    assert terminal['failed']['retries'] == limit
+    before = json.loads(json.dumps(registry.progress()))
+    for _ in range(5):
+        assert registry.begin('failed', {}) == terminal
+    assert registry.progress() == before
+    assert len(before['attempts']['failed']) == limit + 1
+    assert all(row['status'] == 'worker_lost' for row in before['attempts']['failed'])
+    for row in before['attempts']['failed']:
+        assert row['end_utc_ns'] >= row['start_utc_ns']
+        assert row['duration_s'] >= 0
+        assert row['end_time_estimated'] is True
+        assert row['end_time_source'] == 'driver_observed_loss'
+    with pytest.raises(RuntimeError, match='Stale Ray shard completion'):
+        registry.commit('failed', 'late', json.dumps({'attempt': limit + 1}))
+    assert registry.progress() == before
     registry.begin('done', {})
     registry.commit('done', '{"passed":true}', '{"attempt":1}')
     for _ in range(5):
@@ -1030,8 +1276,8 @@ def test_registry_bounds_retries_even_if_a_map_bundle_is_replayed(retries):
 
 def test_old_worker_cannot_overwrite_a_newer_shard_attempt():
     registry = adapter._ActorRegistry(max_retries=1)
-    registry.begin('shape', {})
-    registry.begin('shape', {})
+    registry.begin('shape', {'start_utc_ns': time.time_ns()})
+    registry.begin('shape', {'start_utc_ns': time.time_ns()})
     with pytest.raises(RuntimeError, match='Stale Ray shard completion'):
         registry.commit('shape', 'old', '{"attempt":1}')
     assert registry.progress()['completed_shard_ids'] == []
@@ -1043,15 +1289,316 @@ def test_old_worker_cannot_overwrite_a_newer_shard_attempt():
 
 @pytest.mark.parametrize('version', ['2.54.0', '2.55.0'])
 def test_pre_256_context_does_not_require_map_exception_retry_option(
-    fake_ray, monkeypatch, tmp_path, version
+    evaluator, fake_ray, monkeypatch, tmp_path, version
 ):
+    local, _, _, _ = evaluator
     ray, _ = fake_ray
     ray.__version__ = version
-    config = _retry_fixture(tmp_path, monkeypatch)
+    config = _retry_fixture(evaluator, tmp_path, monkeypatch)
     context = ray.data.DataContext.get_current()
     monkeypatch.delattr(context, 'retried_map_errors')
-    monkeypatch.setattr('atrex_bench.evaluate', lambda config: {'ids': config['shape_ids']})
+    monkeypatch.setattr('atrex_bench.evaluate',
+                        lambda config: local(config['shape_ids'], mode='performance_only'))
     result = adapter.evaluate_ray_data(config)
-    assert len(result['rows']) == 20
+    assert len(result['performance']['shapes']) == 20
     assert not hasattr(context, 'retried_map_errors')
     assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
+
+
+@pytest.mark.parametrize('selection', [['31', '10'], '31,10', '@file'])
+@pytest.mark.parametrize('shard_size,expected_workers', [(1, 2), (2, 1)])
+def test_ray_subset_is_selected_before_partitioning_and_pool_admission(
+    evaluator, fake_ray, monkeypatch, tmp_path, selection, shard_size, expected_workers
+):
+    local, reference, candidate, _ = evaluator
+    ray, _ = fake_ray
+    original_shapes = (reference / 'shapes.json').read_bytes()
+    if selection == '@file':
+        path = tmp_path / 'selection.json'
+        path.write_text('["31", "10"]')
+        selection = '@' + str(path)
+    config = config_for(
+        reference, candidate, tmp_path / 'out', shape_ids=selection,
+        ray_shapes_per_shard=shard_size, ray_max_workers=100,
+    )
+    original_config = config.copy()
+    calls = []
+
+    def run(worker_config):
+        calls.append(worker_config['shape_ids'])
+        assert worker_config['distribution'] == 'local'
+        assert json.loads((Path(worker_config['reference_dir']) / 'shapes.json').read_text()) == (
+            json.loads(original_shapes)
+        )
+        return local(worker_config['shape_ids'], mode='performance_only')
+
+    monkeypatch.setattr('atrex_bench.evaluate', run)
+    result = adapter.evaluate_ray_data(config)
+    requested = ['10', '31']
+    assert calls == ([['10'], ['31']] if shard_size == 1 else [requested])
+    assert result['shape_selection']['all_shape_ids'] == IDS
+    assert result['shape_selection']['selected_shape_ids'] == requested
+    assert result['shape_selection']['partial'] is True
+    assert result['runner_config']['shape_ids'] == requested
+    assert list(result['performance']['shapes']) == requested
+    assert result['distribution']['shard_count'] == expected_workers
+    assert result['distribution']['max_workers'] == expected_workers
+    assert ray.data.last_options['compute'].options['min_size'] == expected_workers
+    assert ray.data.last_options['compute'].options['max_size'] == expected_workers
+    assert ray.data.last_options['max_restarts'] == expected_workers * 8
+    assert ray.data.last_options['max_task_retries'] == 8
+    assert config == original_config
+    assert (reference / 'shapes.json').read_bytes() == original_shapes
+    assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
+
+
+@pytest.mark.parametrize('selection', [[], '', ['unknown'], ['10', '10'], [10], '@missing'])
+def test_invalid_ray_selection_is_rejected_before_connection(
+    evaluator, fake_ray, tmp_path, selection
+):
+    _, reference, candidate, _ = evaluator
+    ray, _ = fake_ray
+    if selection == '@missing':
+        selection = '@' + str(tmp_path / 'missing-ids.txt')
+    with pytest.raises(AtrexConfigError):
+        adapter.evaluate_ray_data(
+            config_for(reference, candidate, tmp_path / 'out', shape_ids=selection)
+        )
+    assert ray.initialized is None
+    assert not ray.handles
+
+
+@pytest.mark.parametrize('selection', [None, ['10', '2', '31'], ['31', '10']])
+@pytest.mark.parametrize(
+    'mutation', [None, 'missing', 'duplicate', 'empty_success', 'fake_success']
+)
+def test_exhausted_multi_shape_shard_has_one_failure_per_shape_and_strict_transport_evidence(
+    evaluator, fake_ray, monkeypatch, tmp_path, selection, mutation
+):
+    local, reference, candidate, _ = evaluator
+    ray, _ = fake_ray
+    monkeypatch.setattr(adapter, '_start_directory_janitor', lambda *args: None)
+    monkeypatch.setattr(adapter.time, 'sleep', lambda seconds: None)
+    context = ray.data.DataContext.get_current()
+    context.actor_task_retry_on_errors = True
+    context.retried_map_errors = ['prior']
+    context.max_errored_blocks = 7
+    calls = []
+
+    def run(config):
+        calls.append(config['shape_ids'])
+        if '10' in config['shape_ids']:
+            raise ray.WorkerLost('worker unavailable')
+        return local(config['shape_ids'], mode='performance_only')
+
+    monkeypatch.setattr('atrex_bench.evaluate', run)
+    ray.data.mutation = mutation
+    requested = IDS if selection is None else sorted(selection)
+    failed_ids = [sid for sid in requested if sid != '31']
+    config = config_for(
+        reference, candidate, tmp_path / 'out', shape_ids=selection,
+        ray_shapes_per_shard=len(failed_ids), ray_max_workers=1, ray_max_shard_retries=1,
+    )
+    if mutation:
+        with pytest.raises((RuntimeError, ValueError), match='Missing|Duplicate|terminal evidence'):
+            adapter.evaluate_ray_data(config)
+    else:
+        result = adapter.evaluate_ray_data(config)
+        assert result['shape_selection']['all_shape_ids'] == IDS
+        assert result['shape_selection']['selected_shape_ids'] == requested
+        assert result['shape_selection']['partial'] is True
+        failures = result['shape_selection']['failed_shapes']
+        assert [failure['shape_id'] for failure in failures] == failed_ids
+        assert all(failure['retries'] == 1 and failure['reason'].strip() for failure in failures)
+        assert set(result['shape_selection']['input_seeds']) == set(requested)
+        assert list(result['performance']['shapes']) == ['31']
+        attempts = result['distribution']['shard_attempts']
+        assert len(attempts['shape-000000']) == 2
+        assert attempts['shape-000001'][0]['status'] == 'completed'
+        tombstone = next(row for row in ray.data.last_results if row['shard_id'] == 'shape-000000')
+        assert tombstone['result_json'] == ''
+    assert calls == [failed_ids, failed_ids, ['31']]
+    assert context.actor_task_retry_on_errors is True
+    assert context.retried_map_errors == ['prior']
+    assert context.max_errored_blocks == 7
+    assert not ray.cloudpickle.list_registry_pickle_by_value()
+    assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
+
+
+def test_register_closes_only_running_attempts_of_restarted_actor(fake_ray, monkeypatch):
+    ray, _ = fake_ray
+    registry = adapter._ActorRegistry(max_retries=1)
+    handle = ray.Handle()
+    assert registry.register(handle) is False
+    actor_id = handle._actor_id.hex()
+    for shard_id, worker in [('lost-a', actor_id), ('lost-b', actor_id), ('other', 'other-actor')]:
+        registry.begin(shard_id, {
+            'shard_id': shard_id, 'shape_ids': ['10'], 'actor_id': worker,
+            'start_utc_ns': 1_000_000_000,
+        })
+    registry.begin('completed', {
+        'actor_id': actor_id, 'start_utc_ns': 1_000_000_000,
+    })
+    registry.commit('completed', '{}', json.dumps({
+        'attempt': 1, 'end_utc_ns': 2_000_000_000, 'duration_s': 1.0,
+        'end_time_estimated': False, 'end_time_source': 'worker',
+    }))
+    replacement = ray.Handle()
+    replacement._actor_id = handle._actor_id
+    monkeypatch.setattr(adapter.time, 'time_ns', lambda: 3_000_000_000)
+    assert registry.register(replacement) is True
+    progress = registry.progress()
+    for shard_id in ('lost-a', 'lost-b'):
+        attempt = progress['attempts'][shard_id][0]
+        assert attempt['status'] == 'worker_lost'
+        assert attempt['end_utc_ns'] == 3_000_000_000
+        assert attempt['duration_s'] == 2.0
+        assert attempt['end_time_estimated'] is True
+        assert attempt['end_time_source'] == 'driver_observed_loss'
+    assert progress['attempts']['other'][0]['status'] == 'running'
+    assert progress['attempts']['completed'][0]['status'] == 'completed'
+    snapshot = json.loads(json.dumps(progress))
+    with pytest.raises(RuntimeError, match='Stale Ray shard completion'):
+        registry.commit('lost-a', '{}', '{"attempt":1}')
+    with pytest.raises(RuntimeError, match='Stale Ray shard failure'):
+        registry.fail('lost-b', '{"attempt":1}', 'late failure')
+    assert registry.progress() == snapshot
+    assert progress['attempts']['completed'][0]['end_utc_ns'] == 2_000_000_000
+    assert registry.workers() == [replacement]
+    closed = json.loads(json.dumps(progress['attempts']['lost-a'][0]))
+    monkeypatch.setattr(adapter.time, 'time_ns', lambda: 4_000_000_000)
+    assert registry.begin('lost-a', {
+        'actor_id': actor_id, 'start_utc_ns': 4_000_000_000,
+    }) == {'attempt': 2}
+    assert registry.progress()['attempts']['lost-a'][0] == closed
+
+
+@pytest.mark.parametrize('error_kind', ['value', 'ray_actor'])
+@pytest.mark.parametrize('report_failure', [None, 'stale_remote', 'registry_lost_get'])
+def test_worker_records_application_failure_without_turning_it_into_transport_retry(
+    fake_ray, monkeypatch, tmp_path, capsys, error_kind, report_failure
+):
+    from atrex_bench import sdk
+
+    ray, _ = fake_ray
+    registry = adapter._ActorRegistry(max_retries=0)
+    worker = adapter._ShardEvaluator.__new__(adapter._ShardEvaluator)
+    worker.root, worker.config = tmp_path, {'distribution': 'local'}
+    worker.registry = ray.Handle(registry)
+    worker.read_fd, worker.write_fd = os.pipe()
+    ray.current = ray.Handle(worker)
+    original_start = sdk._start_process
+    error = (ValueError('application error') if error_kind == 'value'
+             else ray.exceptions.RayActorError('application error'))
+    calls = []
+
+    def run(config):
+        calls.append(config['shape_ids'])
+        raise error
+
+    monkeypatch.setattr('atrex_bench.evaluate', run)
+    if report_failure:
+        token = object()
+        secondary = (RuntimeError('Stale Ray shard failure') if report_failure == 'stale_remote'
+                     else ray.exceptions.RayActorError('registry lost'))
+        original_get = ray.get
+
+        def fail(*args):
+            if report_failure == 'stale_remote':
+                raise secondary
+            return token
+
+        def get(value, **kwargs):
+            if value is token:
+                raise secondary
+            return original_get(value, **kwargs)
+
+        monkeypatch.setattr(registry, 'fail', fail)
+        monkeypatch.setattr(ray, 'get', get)
+    utc = iter([100, 200])
+    monotonic = iter([1_000_000_000, 1_500_000_000])
+    monkeypatch.setattr(adapter.time, 'time_ns', lambda: next(utc))
+    monkeypatch.setattr(adapter.time, 'perf_counter_ns', lambda: next(monotonic))
+    try:
+        with pytest.raises(type(error), match='application error') as caught:
+            worker({'shard_id': ['shape'], 'shape_ids_json': ['["10", "31"]']})
+        assert caught.value is error
+        assert calls == [['10', '31']]
+        execution = registry.progress()['attempts']['shape'][0]
+        assert execution['start_utc_ns'] == 100
+        if report_failure:
+            assert execution['status'] == 'running'
+            diagnostic = capsys.readouterr().err
+            assert '[atrex-ray-registry]' in diagnostic
+            assert str(secondary) in diagnostic
+        else:
+            assert execution['status'] == 'application_failed'
+            assert execution['end_utc_ns'] == 200
+            assert execution['duration_s'] == .5
+            assert execution['end_time_estimated'] is False
+            assert execution['end_time_source'] == 'worker'
+            assert 'application error' in execution['reason']
+        assert sdk._start_process is original_start
+        assert LIFETIME_FD_ENV not in os.environ
+    finally:
+        ray.current = None
+        worker.__del__()
+
+
+def test_terminal_application_failure_rejects_late_commit_and_preserves_evidence():
+    registry = adapter._ActorRegistry(max_retries=3)
+    registry.begin('shape', {'start_utc_ns': 100, 'shape_ids': ['10']})
+    registry.fail('shape', json.dumps({
+        'attempt': 1, 'end_utc_ns': 200, 'duration_s': .5,
+        'end_time_estimated': False, 'end_time_source': 'worker',
+    }), 'ValueError: application error')
+    before = json.loads(json.dumps(registry.progress()))
+    with pytest.raises(RuntimeError, match='Cannot retry an application failure'):
+        registry.begin('shape', {})
+    with pytest.raises(RuntimeError, match='Stale Ray shard completion'):
+        registry.commit('shape', 'late success', '{"attempt":1}')
+    assert registry.progress() == before
+
+
+@pytest.mark.parametrize('terminal', ['completed', 'application_failed', 'worker_exhausted'])
+def test_late_failure_cannot_replace_terminal_registry_evidence(terminal):
+    registry = adapter._ActorRegistry(max_retries=0)
+    execution = {'start_utc_ns': time.time_ns(), 'shape_ids': ['10']}
+    registry.begin('shape', execution)
+    encoded = '{"attempt":1,"end_utc_ns":200,"duration_s":0.5}'
+    if terminal == 'completed':
+        registry.commit('shape', 'success', encoded)
+    elif terminal == 'application_failed':
+        registry.fail('shape', encoded, 'original application failure')
+    else:
+        registry.begin('shape', execution)
+    before = json.loads(json.dumps(registry.progress()))
+    with pytest.raises(RuntimeError, match='Stale Ray shard failure'):
+        registry.fail('shape', encoded, 'late failure')
+    assert registry.progress() == before
+
+
+def test_old_worker_failure_cannot_replace_new_running_attempt():
+    registry = adapter._ActorRegistry(max_retries=1)
+    registry.begin('shape', {'start_utc_ns': time.time_ns()})
+    registry.begin('shape', {'start_utc_ns': time.time_ns()})
+    before = json.loads(json.dumps(registry.progress()))
+    with pytest.raises(RuntimeError, match='Stale Ray shard failure'):
+        registry.fail('shape', '{"attempt":1}', 'old worker error')
+    assert registry.progress() == before
+
+
+def test_begin_closes_prior_running_attempt_with_observed_loss_time(monkeypatch):
+    registry = adapter._ActorRegistry(max_retries=1)
+    execution = {'actor_id': 'old-worker', 'start_utc_ns': 1_000_000_000}
+    registry.begin('shape', execution)
+    monkeypatch.setattr(adapter.time, 'time_ns', lambda: 2_500_000_000)
+    registry.begin('shape', {'actor_id': 'new-worker', 'start_utc_ns': 2_500_000_000})
+    old, new = registry.progress()['attempts']['shape']
+    assert old['status'] == 'worker_lost'
+    assert old['end_utc_ns'] == 2_500_000_000
+    assert old['duration_s'] == 1.5
+    assert old['end_time_estimated'] is True
+    assert old['end_time_source'] == 'driver_observed_loss'
+    assert new['status'] == 'running' and new['attempt'] == 2
+    assert execution == {'actor_id': 'old-worker', 'start_utc_ns': 1_000_000_000}

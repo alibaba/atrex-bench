@@ -249,13 +249,15 @@ and ABBA modes support it. Results mark the selected IDs and partial coverage in
 
 Run disjoint shards on independent GPUs, then merge their result dictionaries
 or JSON paths with `atrex_bench.merge_evaluation_shards(shards, output="merged.json")`.
-Merging requires complete coverage and matching input/evaluator hashes,
-settings, hardware, toolchain, and seeds. See the
+Merging requires complete coverage by default. Pass `shape_ids=[...]` to merge
+an explicit subset, and `failed_shapes=[{"shape_id": "2", "reason": "worker_retry_exhausted", "retries": 3}]`
+only when terminal failure evidence accounts for every missing selected shape.
+Input/evaluator hashes, settings, hardware, toolchain, and seeds must still match. See the
 [shape shard contract and Gateway examples](docs/run_eval_cli_contract.md#explicit-shape-shards-and-offline-merging)
 for `agate eval --shape-shards` and manual subset usage.
 
-Inside an existing Ray cluster, Atrex-Bench can split the complete shape set
-and merge the report automatically:
+Inside an existing Ray cluster, Atrex-Bench can split the full shape set or an
+explicit `--shape-ids` subset and merge the report automatically:
 
 ```bash
 python scripts/run_eval.py --distribution ray_data --ray-max-workers 4 \
@@ -281,6 +283,10 @@ Worker/node failures retry only the affected shard (up to three retries by defau
 shard reports are committed on the driver node and reused even if their worker reply
 is lost. Candidate failures are not retried. The admitted GPU worker limit remains
 unchanged; a driver/registry loss fails the run instead of replaying successful work.
+After exhausted worker retries, completed shards are returned and failed shapes are
+listed in `shape_selection.failed_shapes`; all-shard failure still fails the run.
+`partial=true` can mean either subset selection or failed shapes. Lost-worker attempt
+endpoints are observed upper bounds (`end_time_estimated=true`), not exact GPU usage.
 
 ![Ray Data execution architecture](docs/diagrams/ray-data-execution.png)
 

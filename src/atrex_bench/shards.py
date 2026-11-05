@@ -212,14 +212,14 @@ def _validate_seeds(result: Mapping[str, object]) -> None:
 def merge_evaluation_shards(
     shards: Sequence[Mapping[str, object] | str | Path],
     *,
+    shape_ids: object = None,
+    failed_shapes: Sequence[Mapping[str, object]] | None = None,
     output: str | Path | None = None,
 ) -> dict[str, object]:
-    """Merge complete, disjoint shape shards into the normal evaluation report.
+    """Merge disjoint shards with strict coverage of the requested shape selection.
 
-    Shards may be result mappings or eval_result.json paths. Missing/duplicate
-    shapes and incompatible source, evaluator, config, or environment evidence
-    raise ValueError. Stage failures remain in the report; they are not hidden.
-    ABBA merging preserves all four legs and recomputes global geometric means.
+    Missing selected shapes require explicit failure evidence; duplicate shapes
+    and incompatible inputs still fail. ABBA preserves every completed leg.
     """
     if not shards:
         raise ValueError("At least one evaluation shard is required")
@@ -234,10 +234,34 @@ def merge_evaluation_shards(
         all_ids = first["shape_selection"]["all_shape_ids"]
         if not all_ids or len(set(all_ids)) != len(all_ids):
             raise ValueError("Invalid complete shape set")
+        selected_ids = select_shape_ids(all_ids, shape_ids)
+        failures = [] if failed_shapes is None else list(failed_shapes)
+        failed_ids = set()
+        for failure in failures:
+            if not isinstance(failure, Mapping):
+                raise ValueError("Failed shapes must be objects")
+            shape_id = failure.get("shape_id")
+            if (not isinstance(shape_id, str) or shape_id not in selected_ids
+                    or shape_id in failed_ids):
+                raise ValueError("Invalid or duplicate failed shape ID")
+            if not isinstance(failure.get("reason"), str) or not failure["reason"].strip():
+                raise ValueError("Failed shapes require a non-empty reason")
+            if type(failure.get("retries")) is not int or failure["retries"] < 0:
+                raise ValueError("Failed shapes require a non-negative integer retry count")
+            failed_ids.add(shape_id)
         identity = _compatibility(first)
         seen = set()
         for result in results:
             selection = result["shape_selection"]
+            for key in ("seed_policy", "evaluator_version", "evaluator_sha256"):
+                if not isinstance(selection.get(key), str) or not selection[key]:
+                    raise ValueError(f"Missing immutable shard provenance: {key}")
+            hashes = selection.get("source_hashes")
+            if not isinstance(hashes, Mapping) or any(
+                not isinstance(hashes.get(key), str) or not hashes[key]
+                for key in ("reference.py", "input.py", "shapes.json")
+            ):
+                raise ValueError("Missing immutable shard provenance: source_hashes")
             actual = _compatibility(result)
             if (
                 selection["schema_version"] != SHAPE_SHARD_SCHEMA_VERSION
@@ -271,17 +295,40 @@ def merge_evaluation_shards(
                 raise ValueError("Shard seed coverage differs from selected shapes")
             _validate_seeds(result)
             seen.update(selected)
-        missing = set(all_ids).difference(seen)
+        if seen.difference(selected_ids):
+            raise ValueError("Shard declares shapes outside the requested selection")
+        if seen.intersection(failed_ids):
+            raise ValueError("Failed shapes overlap completed evaluation shapes")
+        missing = set(selected_ids).difference(seen, failed_ids)
         if missing:
             raise ValueError("Missing evaluation shapes: " + ", ".join(sorted(missing)))
+        completed_ids = [shape_id for shape_id in selected_ids if shape_id in seen]
 
         merged = copy.deepcopy(first)
-        merged["shape_selection"]["selected_shape_ids"] = list(all_ids)
-        merged["shape_selection"]["partial"] = False
-        merged["shape_selection"]["input_seeds"] = _merge_shape_blocks(
-            results, ("shape_selection", "input_seeds"), all_ids
+        selection = merged["shape_selection"]
+        selection["selected_shape_ids"] = list(selected_ids)
+        selection["partial"] = selected_ids != all_ids or bool(failures)
+        if failures:
+            selection["failed_shapes"] = [dict(failure) for failure in failures]
+        selection["input_seeds"] = _merge_shape_blocks(
+            results, ("shape_selection", "input_seeds"), completed_ids
         )
-        merged["runner_config"]["shape_ids"] = list(all_ids)
+        from atrex_bench.eval._runtime import deterministic_input_seed
+
+        for shape_id in selected_ids:
+            if shape_id in failed_ids:
+                selection["input_seeds"][shape_id] = {
+                    "correctness": [
+                        deterministic_input_seed("correctness", shape_id, index)
+                        for index in range(selection["correctness_case_count"])
+                    ],
+                    "performance": (
+                        deterministic_input_seed("performance", shape_id, 0)
+                        if merged["runner_config"]["validation_mode"] != "correctness_only"
+                        else None
+                    ),
+                }
+        merged["runner_config"]["shape_ids"] = list(selected_ids)
         merged["shard_evaluations"] = [
             {
                 "eval_id": result["eval_id"],
@@ -304,19 +351,47 @@ def merge_evaluation_shards(
             schedule = _abba_schedule()
             if any(result["abba"]["schedule"] != schedule for result in results):
                 raise ValueError("Incompatible ABBA schedules")
+            for result in results:
+                if len(result["abba"]["runs"]) != len(schedule):
+                    raise ValueError("Incompatible ABBA run count")
+                parent = result["shape_selection"]
+                for index, step in enumerate(schedule):
+                    child = result["abba"]["runs"][index]["result"]["shape_selection"]
+                    differences = [key for key in (
+                        "all_shape_ids", "selected_shape_ids", "seed_policy",
+                        "evaluator_version", "evaluator_sha256",
+                    ) if child.get(key) != parent[key]]
+                    if differences:
+                        raise ValueError(
+                            "Incompatible ABBA leg provenance: " + ", ".join(differences)
+                        )
+                    expected_hash = parent["source_hashes"].get(step["revision"] + ".py")
+                    child_hashes = child.get("source_hashes", {})
+                    if (not isinstance(child_hashes, Mapping)
+                            or not isinstance(expected_hash, str) or not expected_hash
+                            or child_hashes.get("candidate.py") != expected_hash
+                            or {k: v for k, v in child_hashes.items()
+                                if k not in {"candidate.py", "baseline.py"}}
+                            != {k: v for k, v in parent["source_hashes"].items()
+                                if k not in {"candidate.py", "baseline.py"}}):
+                        raise ValueError("Incompatible ABBA leg source hashes")
             runs = []
             for index, expected in enumerate(schedule):
                 rows = [result["abba"]["runs"][index] for result in results]
                 if any({key: row[key] for key in expected} != expected for row in rows):
                     raise ValueError("Incompatible ABBA run order")
-                runs.append(
-                    {**expected, "result": merge_evaluation_shards([row["result"] for row in rows])}
-                )
+                runs.append({
+                    **expected,
+                    "result": merge_evaluation_shards(
+                        [row["result"] for row in rows],
+                        shape_ids=selected_ids, failed_shapes=failures,
+                    ),
+                })
             errors = [str(result["error"]) for result in results if result.get("error")]
             if errors:
                 aggregate, error = None, "\n".join(errors)
             else:
-                aggregate, error = _aggregate_abba_runs(runs, all_ids)
+                aggregate, error = _aggregate_abba_runs(runs, completed_ids)
             merged["abba"].update(
                 runs=runs,
                 baseline=aggregate.get("baseline") if aggregate else None,
@@ -330,13 +405,17 @@ def merge_evaluation_shards(
             merged["error"] = error
         else:
             for stage in ("compile", "correctness", "performance"):
-                merged["passed"][stage] = _merge_shape_blocks(results, ("passed", stage), all_ids)
+                merged["passed"][stage] = _merge_shape_blocks(
+                    results, ("passed", stage), completed_ids
+                )
             for stage in ("correctness", "performance"):
-                merged[stage]["shapes"] = _merge_shape_blocks(results, (stage, "shapes"), all_ids)
+                merged[stage]["shapes"] = _merge_shape_blocks(
+                    results, (stage, "shapes"), completed_ids
+                )
             if "flydsl_compute_ratio" in merged:
                 ratio = merged["flydsl_compute_ratio"]
                 ratio["shapes"] = _merge_shape_blocks(
-                    results, ("flydsl_compute_ratio", "shapes"), all_ids
+                    results, ("flydsl_compute_ratio", "shapes"), completed_ids
                 )
                 valid = [
                     shape["ratio"]
@@ -349,7 +428,9 @@ def merge_evaluation_shards(
                 )
                 average = sum(valid) / len(valid) if valid else 0.0 if non_flydsl else None
                 ratio.update(
-                    average=average, valid_shape_count=len(valid), total_shape_count=len(all_ids)
+                    average=average,
+                    valid_shape_count=len(valid),
+                    total_shape_count=len(completed_ids),
                 )
             errors = [str(result["error"]) for result in results if result.get("error")]
             merged["error"] = "\n".join(errors) or None

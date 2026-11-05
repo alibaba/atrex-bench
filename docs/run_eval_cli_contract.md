@@ -125,6 +125,14 @@ and clock targets must still match. Cross-node elapsed-time comparisons should
 account for the recorded driver differences. Incompatibility errors identify
 the differing report fields.
 
+Pass `shape_ids=[...]` to merge only a requested subset. Optional `failed_shapes`
+entries contain `shape_id`, a non-empty `reason`, and non-negative integer `retries`.
+They must exactly account for missing selected shapes without duplicates or overlap
+with completed results. At least one completed report is required. The full universe
+and requested selection remain in metadata; failed shapes have planned deterministic
+seeds but no fabricated stage verdicts or performance samples. ABBA and geometric
+aggregates use only completed shapes. Default calls still require full coverage.
+
 With a Gateway deployment that supports shape sharding and pins a compatible
 Atrex-Bench wheel, ordinary eval automatically shards when the deployment
 enables it:
@@ -216,8 +224,9 @@ transported source paths; install native dependencies in the worker interpreter'
 `site-packages`. Ray Data
 requires `ray[data]>=2.54,<2.57`, including its pandas/PyArrow dependencies.
 
-Automatic distribution requires the complete shape set. Explicit `shape_ids`
-uses `distribution="local"` and the manual merge API. Omit
+Automatic distribution supports explicit `shape_ids` with the same original ordering,
+seed policy, and full reference snapshot. Only selected shapes are partitioned, and
+the worker limit is capped by their shard count. Omit
 `clock_lock_device`: Ray assigns each actor's visible GPU. A relative
 `checkpoint_dir` remains worker-local; absolute driver checkpoint paths are
 rejected. The driver persists one final `eval_result.json` and the normal SDK
@@ -226,19 +235,27 @@ their input seeds and environment evidence are retained in the native report.
 
 Missing, duplicate, or incompatible shard results fail the distributed run.
 Normal compile/correctness/performance failures remain in the merged report
-and produce the usual failed verdict without retry. Ray system failures retry the
-affected map task up to `ray_max_shard_retries`; user exceptions are not retried.
+and produce the usual failed verdict without retry. User exceptions are not retried.
 A CPU registry on the driver node commits each completed shard before its worker
 returns, so even replay of a lost result or bundled task reuses completed reports
-without running their harness again. Registry attempt counts enforce the shard
-limit independently of map-task replay. Actor restarts are also finite, bounded by
-shard count times the retry limit, and never increase the admitted worker pool.
+without running their harness again. The registry caps started harness attempts at
+`ray_max_shard_retries + 1`; three retries still mean at most four harness attempts.
+A further delivery records exhaustion without invoking the harness. Ray transport
+retries are separately bounded at `2 * (ray_max_shard_retries + 1)`, allowing one
+additional failed delivery per permitted harness attempt for temporary actor/RPC
+unavailability before admission. Persistent transport failures still fail the run.
+Actor restarts are finite, with each actor bounded by shard count times that
+transport retry budget, and never increase the admitted worker pool.
 Restarted workers wait for the previous subprocess cleanup grace period before
-starting evaluation. A driver/registry loss or exhausted retry limit fails the run;
-there is no cross-driver recovery or automatic replay of the whole evaluation.
+starting evaluation. Exhaustion returns completed shards and explicit failed shapes;
+all-shard failure, missing terminal evidence, or driver/registry loss fails the run.
+There is no cross-driver recovery or automatic replay of the whole evaluation.
 `distribution.max_shard_retries` and `distribution.shard_attempts` retain each
 started attempt, placement and committed outcome. The final native report
-has full `shape_selection` coverage and a `distribution` block with `mode`,
+retains the full `all_shape_ids` universe and requested `selected_shape_ids`;
+`failed_shapes` lists each failed ID with its reason and retries. Completed stage
+blocks contain only completed IDs. `partial` is true for a subset or failures.
+The report also has a `distribution` block with `mode`,
 logical `max_workers`, `shard_count`, source snapshot hash, namespace, driver
 job ID, and worker actor IDs. The capability marker is
 `atrex_bench.ray_data.RAY_DATA_DISTRIBUTION_SCHEMA_VERSION == "v1"`.
@@ -253,8 +270,13 @@ visibility; the caller must also provide the zero-GPU allocation and empty mask.
 Shard intervals cover the local evaluation and result serialization, including
 CPU setup. They support checking actual GPU-worker evaluation overlap and wall
 time alongside the per-shape GPU samples; they are not kernel-busy telemetry or
-a speedup guarantee. UTC interval comparison uses the worker clocks, while each
-duration uses its own monotonic clock.
+a speedup guarantee. Completed and application-failed attempts use worker UTC
+endpoints and monotonic durations (`end_time_source="worker"`, `end_time_estimated=false`).
+For a lost worker, the registry records when its loss is observed, including before
+a restarted actor's cleanup grace. Such endpoints and wall-clock durations have
+`end_time_source="driver_observed_loss"` and `end_time_estimated=true`: they are
+observation upper bounds, not exact device use. Consumers must distinguish them
+from measured attempt intervals when calculating billing or concurrency.
 
 Workers and the registry belong to the driver job and are not detached. On
 success or failure the driver kills and confirms registered actors before

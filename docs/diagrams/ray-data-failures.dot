@@ -6,13 +6,14 @@ digraph failures {
   edge [fontname="Helvetica", fontsize=11, color="#536577"];
   running [label="Shard starts\nregistry.begin records attempt"];
   lost [label="Ray worker / node failure\nRay system retry", fillcolor="#fff3d8"];
-  retry [label="Uncommitted shard: retry within limit\nDefault: 3 retries / 4 total attempts\nRestart waits 8s cleanup grace; K unchanged", fillcolor="#fff3d8"];
+  retry [label="Uncommitted shard: retry within registry limit\nDefault: 3 retries / 4 harness attempts\nRecovery RPC failures have a separate finite retry budget\nRestart waits 8s cleanup grace; K unchanged", fillcolor="#fff3d8"];
   committed [label="Committed report\nSuccess OR normal candidate-stage failure\nLost reply replay uses cache: no harness rerun", fillcolor="#e7f4ed"];
-  merge [label="Collect all N reports + validate\nMissing / duplicate / incompatible → fail run"];
-  fail [label="Fail distributed run\nRaised user exception; retries exhausted;\ndriver / registry lost; invalid merged evidence", fillcolor="#fceceb"];
+  merge [label="Collect completed reports + failure evidence\nMissing / duplicate / incompatible → fail run"];
+  exhausted [label="Record exhausted shard without another harness attempt\nExplicit failed shape IDs, reasons and retry counts", fillcolor="#fff3d8"];
+  fail [label="Fail distributed run\nRaised user exception; all shards failed;\ndriver / registry lost; invalid merged evidence", fillcolor="#fceceb"];
   cleanup [label="Driver cleanup (finally)\nDrain owned actors; terminate registry;\nrestore globals; disconnect", fillcolor="#f3edf8"];
   primary [label="Re-raise primary failure", fillcolor="#fceceb"];
-  result [label="Return complete report\nNormal candidate failures retain failed verdict", fillcolor="#e7f4ed"];
+  result [label="Return completed shapes + explicit failed shapes\nNormal candidate failures retain failed verdict", fillcolor="#e7f4ed"];
   error [label="Cleanup timeout / error\nExisting failure: preserve it + log cleanup error\nOtherwise: raise cleanup error; no success report", fillcolor="#fceceb"];
   hard [label="Hard driver stop cannot run finally\nActor lifetime guards still clean descendants\nCaller verifies terminal actors/tasks + 8s grace", fillcolor="#f3edf8"];
   running -> committed [label="compile / correctness / performance report"];
@@ -20,7 +21,8 @@ digraph failures {
   lost -> committed [label="already committed"];
   lost -> retry [label="not committed; budget remains"];
   retry -> running [label="next attempt", constraint=false];
-  lost -> fail [label="limit exhausted"];
+  lost -> exhausted [label="limit exhausted"];
+  exhausted -> merge [label="other shards retained"];
   running -> fail [label="raised user exception", style=dashed];
   committed -> merge;
   merge -> cleanup [label="complete"];
