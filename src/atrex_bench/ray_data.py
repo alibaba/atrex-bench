@@ -456,6 +456,8 @@ def evaluate_ray_data(config):
         raise AtrexConfigError("ray_data requires at least one shape")
     maximum = min(config.get("ray_max_workers", len(shards)), len(shards))
     max_retries = config.get("ray_max_shard_retries", 3)
+    # Actor recovery RPCs can fail before admission; only the registry counts harness attempts.
+    transport_retries = 2 * (max_retries + 1)
     namespace = (
         os.environ.get("AGATE_RAY_NAMESPACE")
         or config.get("ray_namespace")
@@ -514,9 +516,8 @@ def evaluate_ray_data(config):
                 min_size=maximum, max_size=maximum, max_tasks_in_flight_per_actor=1
             ),
             fn_constructor_args=(bundle, config, registry),
-            max_restarts=len(shards) * (max_retries + 1),
-            # The last delivery records exhaustion without invoking the evaluator.
-            max_task_retries=max_retries + 1,
+            max_restarts=len(shards) * transport_retries,
+            max_task_retries=transport_retries,
             **placement,
         )
         results = dataset.take_all()

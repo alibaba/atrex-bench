@@ -29,9 +29,11 @@ handles = []
 current = None
 class RayActorError(Exception): pass
 class GetTimeoutError(Exception): pass
+class ActorUnavailableError(RayActorError): pass
 # Process loss cannot report an application exception.
 class WorkerLost(BaseException): pass
-exceptions = types.SimpleNamespace(RayActorError=RayActorError, GetTimeoutError=GetTimeoutError)
+exceptions = types.SimpleNamespace(RayActorError=RayActorError, GetTimeoutError=GetTimeoutError,
+                                  ActorUnavailableError=ActorUnavailableError)
 pickle_registry = set()
 cloudpickle = types.SimpleNamespace(
     register_pickle_by_value=lambda m: pickle_registry.add(m.__name__),
@@ -83,6 +85,8 @@ last_rows = None
 last_results = None
 deliveries = {}
 mutation = None
+unavailable_before_admission = 0
+unavailable_before_tombstone = 0
 class DataContext:
     actor_task_retry_on_errors = False
     retried_map_errors = False
@@ -113,14 +117,28 @@ class Dataset:
             os.environ["CUDA_VISIBLE_DEVICES"] = "0"
             for index, row in enumerate(self.rows):
                 ray.current, actor = actors[index % count]
+                lost_attempts = unavailable_attempts = 0
+                retries = self.options["fn_constructor_args"][1].get("ray_max_shard_retries", 3)
+                harness_limit = retries + 1
                 for attempt in range(self.options["max_task_retries"] + 1):
                     deliveries[row["shard_id"]] = deliveries.get(row["shard_id"], 0) + 1
+                    if attempt < unavailable_before_admission:
+                        if attempt == self.options["max_task_retries"]:
+                            raise ray.exceptions.ActorUnavailableError("temporary actor RPC loss")
+                        continue
+                    if (lost_attempts == harness_limit
+                            and unavailable_attempts < unavailable_before_tombstone):
+                        unavailable_attempts += 1
+                        if attempt == self.options["max_task_retries"]:
+                            raise ray.exceptions.ActorUnavailableError("temporary actor RPC loss")
+                        continue
                     try:
                         out = actor({key: [value] for key,value in row.items()})
-                        if mutation == "lost_reply" and attempt == 0:
+                        if mutation == "lost_reply" and attempt == unavailable_before_admission:
                             raise ray.WorkerLost("lost worker reply")
                         break
                     except ray.WorkerLost as error:
+                        lost_attempts += 1
                         if attempt == self.options["max_task_retries"]:
                             raise ray.exceptions.RayActorError(str(error)) from error
                         actor.__del__()
@@ -967,8 +985,8 @@ def test_only_ten_lost_workers_retry_in_twenty_shards(
     assert lost == 10 * failures
     assert len(result['distribution']['worker_actor_ids']) == 2
     assert ray.data.last_options['num_gpus'] == 1
-    assert ray.data.last_options['max_task_retries'] == 4
-    assert ray.data.last_options['max_restarts'] == 80
+    assert ray.data.last_options['max_task_retries'] == 8
+    assert ray.data.last_options['max_restarts'] == 160
     assert result['distribution']['max_shard_retries'] == 3
     for rows in attempts.values():
         assert [row['attempt'] for row in rows] == list(range(1, len(rows) + 1))
@@ -982,7 +1000,10 @@ def test_only_ten_lost_workers_retry_in_twenty_shards(
     assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
 
 
-def test_committed_shards_survive_lost_worker_replies(evaluator, fake_ray, monkeypatch, tmp_path):
+@pytest.mark.parametrize('unavailable', [0, 4])
+def test_committed_shards_survive_lost_worker_replies(
+    evaluator, fake_ray, monkeypatch, tmp_path, unavailable
+):
     from collections import Counter
 
     local, _, _, _ = evaluator
@@ -996,6 +1017,7 @@ def test_committed_shards_survive_lost_worker_replies(evaluator, fake_ray, monke
         return local(config['shape_ids'], mode='performance_only')
 
     ray.data.mutation = 'lost_reply'
+    ray.data.unavailable_before_admission = unavailable
     monkeypatch.setattr('atrex_bench.evaluate', run)
     result = adapter.evaluate_ray_data(config)
     assert len(result['performance']['shapes']) == 20
@@ -1044,8 +1066,8 @@ def test_worker_retry_exhaustion_is_bounded_and_later_shards_complete(
         assert list(result['passed'][stage]) == completed_ids
     for stage in ('correctness', 'performance'):
         assert list(result[stage]['shapes']) == completed_ids
-    assert ray.data.last_options['max_task_retries'] == limit + 1
-    assert ray.data.last_options['max_restarts'] == 20 * (limit + 1)
+    assert ray.data.last_options['max_task_retries'] == 2 * (limit + 1)
+    assert ray.data.last_options['max_restarts'] == 40 * (limit + 1)
     for index, row in enumerate(sorted(ray.data.last_results, key=lambda row: row['shard_id'])):
         sid = ids[index]
         attempts = result['distribution']['shard_attempts'][row['shard_id']]
@@ -1059,6 +1081,83 @@ def test_worker_retry_exhaustion_is_bounded_and_later_shards_complete(
         else:
             assert json.loads(row['result_json'])['shape_selection']['selected_shape_ids'] == [sid]
             assert attempts[0]['status'] == 'completed'
+    assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
+
+
+@pytest.mark.parametrize('retries', [0, 1, 3])
+@pytest.mark.parametrize('all_failed', [False, True])
+@pytest.mark.parametrize('phase', ['before_admission', 'before_tombstone'])
+def test_transport_failures_do_not_consume_shard_harness_budget(
+    evaluator, fake_ray, monkeypatch, tmp_path, retries, all_failed, phase
+):
+    from collections import Counter
+
+    local, _, _, _ = evaluator
+    ray, _ = fake_ray
+    config = _retry_fixture(evaluator, tmp_path, monkeypatch)
+    config['ray_max_shard_retries'] = retries
+    setattr(ray.data, 'unavailable_' + phase, retries + 1)
+    calls = Counter()
+
+    def run(config):
+        sid = config['shape_ids'][0]
+        calls[sid] += 1
+        if all_failed or sid != '19':
+            raise ray.WorkerLost('injected worker process loss')
+        return local([sid], mode='performance_only')
+
+    monkeypatch.setattr('atrex_bench.evaluate', run)
+    if all_failed:
+        with pytest.raises(RuntimeError, match='All Ray evaluation shards failed'):
+            adapter.evaluate_ray_data(config)
+    else:
+        result = adapter.evaluate_ray_data(config)
+        assert set(result['passed']['compile']) == {'19'}
+        assert len(result['shape_selection']['failed_shapes']) == 19
+        assert all(failure['retries'] == retries
+                   for failure in result['shape_selection']['failed_shapes'])
+    assert calls['19'] == (retries + 1 if all_failed else 1)
+    assert all(count == retries + 1 for sid, count in calls.items() if all_failed or sid != '19')
+    assert len(ray.data.last_results) == 20
+    successful_deliveries = retries + 2 if phase == 'before_admission' else 1
+    assert all(ray.data.deliveries[row['shard_id']] == (
+        2 * (retries + 1) + 1 if not row['result_json'] else successful_deliveries
+    ) for row in ray.data.last_results)
+    assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
+
+
+def test_persistent_transport_failure_remains_bounded(evaluator, fake_ray, monkeypatch, tmp_path):
+    ray, _ = fake_ray
+    config = _retry_fixture(evaluator, tmp_path, monkeypatch)
+    calls = []
+    monkeypatch.setattr('atrex_bench.evaluate', lambda config: calls.append(config))
+    ray.data.unavailable_before_admission = 100
+    with pytest.raises(ray.exceptions.ActorUnavailableError, match='temporary actor RPC loss'):
+        adapter.evaluate_ray_data(config)
+    assert calls == []
+    assert list(ray.data.deliveries.values()) == [ray.data.last_options['max_task_retries'] + 1]
+    assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
+
+
+def test_persistent_recovery_rpc_failure_does_not_rerun_the_harness(
+    evaluator, fake_ray, monkeypatch, tmp_path
+):
+    from collections import Counter
+
+    ray, _ = fake_ray
+    config = _retry_fixture(evaluator, tmp_path, monkeypatch)
+    ray.data.unavailable_before_tombstone = 100
+    calls = Counter()
+
+    def run(config):
+        calls[config['shape_ids'][0]] += 1
+        raise ray.WorkerLost('worker process loss')
+
+    monkeypatch.setattr('atrex_bench.evaluate', run)
+    with pytest.raises(ray.exceptions.ActorUnavailableError, match='temporary actor RPC loss'):
+        adapter.evaluate_ray_data(config)
+    assert list(calls.values()) == [4]
+    assert list(ray.data.deliveries.values()) == [9]
     assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
 
 
@@ -1246,8 +1345,8 @@ def test_ray_subset_is_selected_before_partitioning_and_pool_admission(
     assert result['distribution']['max_workers'] == expected_workers
     assert ray.data.last_options['compute'].options['min_size'] == expected_workers
     assert ray.data.last_options['compute'].options['max_size'] == expected_workers
-    assert ray.data.last_options['max_restarts'] == expected_workers * 4
-    assert ray.data.last_options['max_task_retries'] == 4
+    assert ray.data.last_options['max_restarts'] == expected_workers * 8
+    assert ray.data.last_options['max_task_retries'] == 8
     assert config == original_config
     assert (reference / 'shapes.json').read_bytes() == original_shapes
     assert ray.shutdown_called and all(handle.dead for handle in ray.handles)

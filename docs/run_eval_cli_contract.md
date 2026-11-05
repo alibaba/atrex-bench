@@ -235,15 +235,17 @@ their input seeds and environment evidence are retained in the native report.
 
 Missing, duplicate, or incompatible shard results fail the distributed run.
 Normal compile/correctness/performance failures remain in the merged report
-and produce the usual failed verdict without retry. Ray system failures retry the
-affected map task up to `ray_max_shard_retries`; user exceptions are not retried.
+and produce the usual failed verdict without retry. User exceptions are not retried.
 A CPU registry on the driver node commits each completed shard before its worker
 returns, so even replay of a lost result or bundled task reuses completed reports
-without running their harness again. Registry attempt counts enforce the shard
-limit independently of map-task replay. One extra transport delivery records a
-terminal failed shard without invoking its harness; three retries still mean four
-harness attempts. Actor restarts are finite, bounded by shard count times
-`ray_max_shard_retries + 1`, and never increase the admitted worker pool.
+without running their harness again. The registry caps started harness attempts at
+`ray_max_shard_retries + 1`; three retries still mean at most four harness attempts.
+A further delivery records exhaustion without invoking the harness. Ray transport
+retries are separately bounded at `2 * (ray_max_shard_retries + 1)`, allowing one
+additional failed delivery per permitted harness attempt for temporary actor/RPC
+unavailability before admission. Persistent transport failures still fail the run.
+Actor restarts are finite, with each actor bounded by shard count times that
+transport retry budget, and never increase the admitted worker pool.
 Restarted workers wait for the previous subprocess cleanup grace period before
 starting evaluation. Exhaustion returns completed shards and explicit failed shapes;
 all-shard failure, missing terminal evidence, or driver/registry loss fails the run.

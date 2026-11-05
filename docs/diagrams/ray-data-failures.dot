@@ -6,7 +6,7 @@ digraph failures {
   edge [fontname="Helvetica", fontsize=11, color="#536577"];
   running [label="Shard starts\nregistry.begin records attempt"];
   lost [label="Ray worker / node failure\nRay system retry", fillcolor="#fff3d8"];
-  retry [label="Uncommitted shard: retry within limit\nDefault: 3 retries / 4 total attempts\nRestart waits 8s cleanup grace; K unchanged", fillcolor="#fff3d8"];
+  retry [label="Uncommitted shard: retry within registry limit\nDefault: 3 retries / 4 harness attempts\nRecovery RPC failures have a separate finite retry budget\nRestart waits 8s cleanup grace; K unchanged", fillcolor="#fff3d8"];
   committed [label="Committed report\nSuccess OR normal candidate-stage failure\nLost reply replay uses cache: no harness rerun", fillcolor="#e7f4ed"];
   merge [label="Collect completed reports + failure evidence\nMissing / duplicate / incompatible → fail run"];
   exhausted [label="Record exhausted shard without another harness attempt\nExplicit failed shape IDs, reasons and retry counts", fillcolor="#fff3d8"];

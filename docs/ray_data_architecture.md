@@ -16,7 +16,11 @@ outcome, not an infrastructure retry. Raised user exceptions fail the distribute
 run. Ray worker/node failures may replay a map task; the registry checks each
 shard before running its harness, reuses committed results, caps attempts, and
 rejects stale completions. Default three retries means four harness attempts.
-One additional transport delivery records exhaustion without running the harness.
+A further transport delivery records exhaustion without running the harness.
+Temporary recovery RPC failures may occur before the registry admits an attempt;
+Ray transport retries are bounded separately at `2 * (max_retries + 1)` while
+registry admission still permits only `max_retries + 1` harness calls. Actor restart
+limits use the finite transport budget, and persistent transport loss remains fatal.
 Exhausted shards produce explicit `shape_selection.failed_shapes`; successful
 shards and remaining work are retained. All-shard failure or incomplete terminal
 evidence still fails the run. There is no durable checkpoint or whole-driver recovery.
