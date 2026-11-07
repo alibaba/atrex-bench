@@ -52,7 +52,7 @@ class ClockLockConfig:
     monitor_enabled: bool | None = None
     sample_interval_ms: int = 10
     runtime_tolerance_mhz: int = 0
-    fail_on_deviation: bool = True
+    fail_on_deviation: bool | None = None
 
     def __post_init__(self) -> None:
         if self.mode not in {"off", "external", "manage"}:
@@ -89,13 +89,17 @@ class ClockLockConfig:
             raise ValueError(
                 "runtime_tolerance_mhz must be a non-negative integer"
             )
-        if not isinstance(self.fail_on_deviation, bool):
+        if self.fail_on_deviation is None:
+            object.__setattr__(
+                self, "fail_on_deviation", self.mode != "manage" or self.graphics_mhz is not None
+            )
+        elif not isinstance(self.fail_on_deviation, bool):
             raise ValueError("fail_on_deviation must be a boolean")
 
         if self.mode == "manage":
-            if not _is_positive_int(self.graphics_mhz):
+            if self.graphics_mhz is not None and not _is_positive_int(self.graphics_mhz):
                 raise ValueError(
-                    "manage mode requires a positive integer graphics_mhz value"
+                    "graphics_mhz must be a positive integer when provided"
                 )
             if self.memory_mhz is not None and not _is_positive_int(
                 self.memory_mhz
@@ -155,6 +159,8 @@ class _NvidiaClockController(_VisibleIndexProvider, Protocol):
     ) -> tuple[ComputeProcess, ...]: ...
 
     def query_clocks(self, device: NvidiaDevice) -> ClockSnapshot: ...
+
+    def query_max_clock(self, device: NvidiaDevice) -> int: ...
 
     def lock_graphics(self, device: NvidiaDevice, mhz: int) -> None: ...
 
@@ -300,6 +306,7 @@ class ManagedClockLock:
         if config.mode != "manage":
             raise ValueError("ManagedClockLock requires clock_lock_mode=manage")
         self.config = config
+        self._automatic_graphics_target = config.graphics_mhz is None
         self._nvidia_smi = nvidia_smi
         self._monitor_factory = monitor_factory
         self._environ = environ
@@ -371,11 +378,17 @@ class ManagedClockLock:
         self._lock_handle.close()
         self._lock_handle = None
 
-    def _verify_snapshot(self, snapshot: ClockSnapshot) -> None:
+    def _verify_snapshot(self, snapshot: ClockSnapshot) -> bool:
         graphics_mhz = self.config.graphics_mhz
         memory_mhz = self.config.memory_mhz
         assert graphics_mhz is not None
-        if abs(snapshot.graphics_mhz - graphics_mhz) > self.config.tolerance_mhz:
+        graphics_verified = abs(snapshot.graphics_mhz - graphics_mhz) <= self.config.tolerance_mhz
+        allow_downclock = (
+            self._automatic_graphics_target
+            and not self.config.fail_on_deviation
+            and 0 < snapshot.graphics_mhz < graphics_mhz
+        )
+        if not graphics_verified and not allow_downclock:
             raise ClockLockError(
                 f"graphics clock mismatch: expected {graphics_mhz} MHz, "
                 f"observed {snapshot.graphics_mhz} MHz"
@@ -387,6 +400,7 @@ class ManagedClockLock:
                 f"memory clock mismatch: expected {memory_mhz} MHz, "
                 f"observed {snapshot.memory_mhz} MHz"
             )
+        return graphics_verified
 
     @staticmethod
     def _normalized_uuid(value: str) -> str:
@@ -457,6 +471,10 @@ class ManagedClockLock:
                         f"{details}."
                     )
 
+            if self.config.graphics_mhz is None:
+                maximum = self._nvidia_smi.query_max_clock(device)
+                self.config = replace(self.config, graphics_mhz=maximum)
+                self._publish(requested_graphics_mhz=maximum)
             assert self.config.graphics_mhz is not None
             self._nvidia_smi.lock_graphics(device, self.config.graphics_mhz)
             self._graphics_applied = True
@@ -468,10 +486,10 @@ class ManagedClockLock:
 
             snapshot = self._nvidia_smi.query_clocks(device)
             self._publish(verification_snapshot=snapshot)
-            self._verify_snapshot(snapshot)
+            setup_verified = self._verify_snapshot(snapshot)
             self._publish(
-                setup_verified=True,
-                verified=not self.config.monitor_enabled,
+                setup_verified=setup_verified,
+                verified=setup_verified and not self.config.monitor_enabled,
             )
 
             if self.config.monitor_enabled:

@@ -239,6 +239,10 @@ Each of the four runs performs the full compile, correctness, and performance
 pipeline in an isolated worker. The top-level `eval_result.json` reports the
 per-shape and aggregate candidate speedup over the baseline. With managed clock
 locking, one lock and monitoring session covers the complete A-B-B-A sequence.
+Add `--lock-clocks` to select the assigned GPU's maximum SM frequency automatically,
+or pass `--gpu-clock-mhz` to choose an explicit target. With Ray Data, each GPU
+worker resolves its own maximum. Observed frequency verification and restoration
+remain separate evidence; see [clock locking](docs/run_eval_clock_lock.md).
 
 To evaluate an explicit shape subset, add `--shape-ids 0,2` or
 `--shape-ids @ids.json` (a JSON array of original shape IDs). The SDK config field

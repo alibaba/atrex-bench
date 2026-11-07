@@ -1667,20 +1667,22 @@ def test_clock_lock_config_loads_managed_json_values() -> None:
     assert config.runtime_tolerance_mhz == 7
 
 
-def test_clock_lock_config_allows_graphics_only_managed_mode() -> None:
+@pytest.mark.parametrize("frequency", [None, 1500])
+def test_clock_lock_config_allows_graphics_only_managed_mode(frequency) -> None:
     from scripts import run_eval as run_eval_module
 
     config = run_eval_module._resolve_clock_lock_config(
-        _clock_lock_args(lock_clocks=True, gpu_clock_mhz=1500),
+        _clock_lock_args(lock_clocks=True, gpu_clock_mhz=frequency),
         {},
     )
 
     assert config.mode == "manage"
-    assert config.graphics_mhz == 1500
+    assert config.graphics_mhz == frequency
     assert config.memory_mhz is None
     assert config.monitor_enabled is True
     assert config.sample_interval_ms == 10
     assert config.runtime_tolerance_mhz == 0
+    assert config.fail_on_deviation is (frequency is not None)
 
 
 def test_clock_lock_cli_values_override_json() -> None:

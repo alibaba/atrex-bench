@@ -226,7 +226,10 @@ def test_invalid_distribution_config(mutation):
         adapter.validate_distribution({"distribution": "ray_data", **mutation})
 
 
-def test_actor_distribution_preserves_shapes_and_paths(evaluator, fake_ray, monkeypatch, tmp_path):
+@pytest.mark.parametrize("frequency", [None, 1000])
+def test_actor_distribution_preserves_shapes_and_paths(
+    evaluator, fake_ray, monkeypatch, tmp_path, frequency,
+):
     local, reference, candidate, _ = evaluator
     ray, _ = fake_ray
     calls = []
@@ -251,7 +254,7 @@ def test_actor_distribution_preserves_shapes_and_paths(evaluator, fake_ray, monk
             ray_resources={"gpu_worker": 0.001},
             ray_node_selector={"kind": "worker"},
             clock_lock_mode="manage",
-            gpu_clock_mhz=1000,
+            gpu_clock_mhz=frequency,
             checkpoint_dir="checkpoints",
         )
     )
@@ -268,7 +271,7 @@ def test_actor_distribution_preserves_shapes_and_paths(evaluator, fake_ray, monk
     assert ray.data.last_options["compute"].options["max_tasks_in_flight_per_actor"] == 1
     assert ray.data.last_options["resources"] == {"gpu_worker": 0.001}
     assert calls[0]["clock_lock_mode"] == "manage"
-    assert calls[0]["gpu_clock_mhz"] == 1000
+    assert calls[0]["gpu_clock_mhz"] == frequency
     assert calls[0]["checkpoint_dir"] == "checkpoints"
     assert str(tmp_path / "output") not in calls[0]["output"]
     assert ray.shutdown_called and all(handle.dead for handle in ray.handles)
