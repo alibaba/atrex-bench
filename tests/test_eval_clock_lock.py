@@ -311,13 +311,12 @@ def test_nonmanaged_config_defaults_monitor_off() -> None:
 @pytest.mark.parametrize(
     "kwargs",
     [
-        {"mode": "manage", "memory_mhz": 3996},
         {"mode": "manage", "graphics_mhz": 0, "memory_mhz": 3996},
         {"mode": "manage", "graphics_mhz": True, "memory_mhz": 3996},
         {"mode": "manage", "graphics_mhz": 1500, "memory_mhz": -1},
     ],
 )
-def test_managed_config_rejects_missing_or_invalid_frequencies(
+def test_managed_config_rejects_invalid_frequencies(
     kwargs: dict[str, object],
 ) -> None:
     with pytest.raises(ValueError, match="positive integer"):
@@ -455,6 +454,7 @@ class FakeNvidiaSmi:
     processes: tuple[ComputeProcess, ...] = ()
     failures: set[str] = field(default_factory=set)
     events: list[str] = field(default_factory=list)
+    max_clock_mhz: int = 1500
 
     def _record(self, event: str) -> None:
         self.events.append(event)
@@ -483,6 +483,10 @@ class FakeNvidiaSmi:
     def query_clocks(self, device: NvidiaDevice) -> ClockSnapshot:
         self._record("query_clocks")
         return self.snapshots.pop(0)
+
+    def query_max_clock(self, device: NvidiaDevice) -> int:
+        self._record("query_max_clock")
+        return self.max_clock_mhz
 
     def lock_graphics(self, device: NvidiaDevice, mhz: int) -> None:
         self._record(f"lock_graphics:{mhz}")
@@ -1193,6 +1197,108 @@ def test_clock_mismatch_resets_both_clocks(tmp_path) -> None:
             pass
 
     assert smi.events[-3:] == ["reset_graphics", "reset_memory", "query_clocks"]
+    assert session.report.verified is False
+    assert session.report.restored is True
+
+
+def test_query_max_clock_is_scoped_to_resolved_gpu_uuid() -> None:
+    runner = ScriptedRunner([completed("2100\n")])
+    device = NvidiaDevice("2", "2", "GPU-aabb", "NVIDIA Test GPU")
+    assert NvidiaSmi(run=runner, geteuid=lambda: 0).query_max_clock(device) == 2100
+    assert runner.calls[0][0] == [
+        "nvidia-smi", "-i", "GPU-aabb", "--query-gpu=clocks.max.sm",
+        "--format=csv,noheader,nounits",
+    ]
+
+
+@pytest.mark.parametrize("output", ["", "[N/A]", "0", "-1", "1.5", "1500\n2100"])
+def test_query_max_clock_rejects_unknown_or_invalid_frequency(output: str) -> None:
+    runner = ScriptedRunner([completed(output)])
+    device = NvidiaDevice("0", "0", "GPU-aabb", "NVIDIA Test GPU")
+    with pytest.raises(NvidiaClockError, match="maximum SM clock"):
+        NvidiaSmi(run=runner, geteuid=lambda: 0).query_max_clock(device)
+
+
+@pytest.mark.parametrize("maximum", [1500, 2100])
+def test_unspecified_clock_uses_each_workers_own_maximum(tmp_path, maximum: int) -> None:
+    config = ClockLockConfig(mode="manage", settle_seconds=0, monitor_enabled=False)
+    smi = FakeNvidiaSmi(
+        snapshots=[ClockSnapshot(maximum, 3996, "t0"), ClockSnapshot(300, 3996, "t1")],
+        max_clock_mhz=maximum,
+    )
+    with ManagedClockLock(
+        config=config, nvidia_smi=smi, environ={"CUDA_VISIBLE_DEVICES": "2"},
+        lock_directory=tmp_path, visible_device_uuid=lambda: "GPU-aabb",
+    ) as session:
+        assert session.config.graphics_mhz == maximum
+        assert session.report.requested_graphics_mhz == maximum
+    assert config.graphics_mhz is None
+    assert smi.events.index("query_max_clock") < smi.events.index(f"lock_graphics:{maximum}")
+    assert session.report.verified and session.report.restored
+
+
+def test_failed_maximum_probe_never_changes_clocks(tmp_path) -> None:
+    smi = FakeNvidiaSmi(snapshots=[], failures={"query_max_clock"})
+    session = ManagedClockLock(
+        config=ClockLockConfig(mode="manage"), nvidia_smi=smi,
+        environ={"CUDA_VISIBLE_DEVICES": "0"}, lock_directory=tmp_path,
+    )
+    with pytest.raises(ClockLockError, match="query_max_clock"):
+        with session:
+            pytest.fail("evaluation must not start without a target")
+    assert not any(e.startswith(("lock_graphics", "reset_graphics")) for e in smi.events)
+    assert session.report.applied is False
+    assert session.report.verified is False
+    assert session.report.restored is False
+
+
+def test_auto_maximum_is_the_monitor_target(tmp_path) -> None:
+    smi = FakeNvidiaSmi(
+        snapshots=[ClockSnapshot(1132, 3996, "t0"), ClockSnapshot(300, 3996, "t1")],
+        max_clock_mhz=1132,
+    )
+    configs = []
+
+    def monitor(device, config):
+        configs.append(config)
+        return FakeClockMonitor(smi.events)
+
+    with ManagedClockLock(
+        config=ClockLockConfig(mode="manage", settle_seconds=0),
+        nvidia_smi=smi, monitor_factory=monitor,
+        environ={"CUDA_VISIBLE_DEVICES": "0"}, lock_directory=tmp_path,
+    ) as session:
+        pass
+    assert configs[0].graphics_mhz == 1132
+    assert session.report.verified and session.report.restored
+
+
+@pytest.mark.parametrize("strict,observed,allowed", [
+    (None, 1000, True), (True, 1000, False), (None, 0, False), (None, 1400, False),
+])
+def test_auto_maximum_only_allows_positive_downclocking(tmp_path, strict, observed, allowed):
+    smi = FakeNvidiaSmi(
+        snapshots=[ClockSnapshot(observed, 3996, "t0"), ClockSnapshot(300, 3996, "t1")],
+        max_clock_mhz=1132,
+    )
+    session = ManagedClockLock(
+        config=ClockLockConfig(mode="manage", settle_seconds=0, fail_on_deviation=strict),
+        nvidia_smi=smi,
+        monitor_factory=lambda _device, _config: FakeClockMonitor(
+            smi.events, measurement=stable_measurement(verified=False),
+        ),
+        environ={"CUDA_VISIBLE_DEVICES": "0"}, lock_directory=tmp_path,
+    )
+    if allowed:
+        with session:
+            assert session.report.applied and not session.report.setup_verified
+        assert session.report.error is None
+        assert session.report.measurement_verified is False
+        assert session.report.fail_on_deviation is False
+    else:
+        with pytest.raises(ClockLockError, match="graphics clock mismatch"):
+            with session:
+                pytest.fail("invalid clock must not start evaluation")
     assert session.report.verified is False
     assert session.report.restored is True
 

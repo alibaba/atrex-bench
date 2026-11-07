@@ -37,7 +37,23 @@ uv run python scripts/run_eval.py \
   --clock-lock-runtime-tolerance-mhz 0
 ```
 
-Managed mode requires an explicit positive integer for `--gpu-clock-mhz`. `--memory-clock-mhz` is an optional positive integer for devices that support runtime memory-clock locking. The current implementation does not infer clock frequencies from GPU names or provide default frequencies that apply across machines.
+With `--lock-clocks` alone, the process resolves its assigned GPU, reads that GPU's
+`clocks.max.sm` through `nvidia-smi`, and uses the reported maximum as the graphics
+clock target. Ray Data performs this independently inside each GPU worker, so a CPU
+driver never probes a GPU and different GPU models do not share a guessed frequency.
+The resolved target is recorded in `environment.clock_lock.requested.graphics_mhz`.
+An explicit positive `--gpu-clock-mhz` overrides discovery. `--memory-clock-mhz`
+remains optional for devices supporting runtime memory-clock locking.
+
+Maximum clocks are hardware ceilings, not a guarantee of sustained frequency.
+Automatic maximum selection defaults to recording positive graphics-clock downclocking
+without aborting evaluation, including the initial snapshot. The lock is still applied
+at the reported maximum; no lower target or wider tolerance is substituted. `verified`
+remains false when observed frequencies do not meet the target. Explicit-frequency mode
+retains strict verification by default. Set `clock_lock_fail_on_deviation=true` to require
+strict verification with automatic selection too. An unavailable maximum, device mismatch,
+clock-setting error, invalid observation, forbidden event, or restoration error still fails.
+Check each worker's requested and observed clocks, `verified`, and `restored` fields.
 
 The device selector is resolved in this order:
 
@@ -171,7 +187,7 @@ Managed mode writes:
 
 Both JSON files are updated atomically using a temporary file in the same directory, `fsync`, and `os.replace`.
 
-A failure during lock acquisition, the idle check, clock setting, initial verification, monitor startup, or restoration, or the occurrence of a forbidden event, prevents the worker from starting or causes the CLI to return a nonzero exit code. With `clock_lock_fail_on_deviation=false`, results with complete sampling and only graphics-clock downclocking retain correctness and performance data without a top-level `error`. `environment.clock_locked=false` and `measurement_verified=false` preserve the evidence.
+A failure during lock acquisition, the idle check, clock setting, monitor startup, or restoration, or the occurrence of a forbidden event, prevents the worker from starting or causes the CLI to return a nonzero exit code. Initial verification is strict except for positive graphics-clock downclocking in automatic-maximum mode with `clock_lock_fail_on_deviation=false`. With that setting, results with complete sampling and only graphics-clock downclocking retain correctness and performance data without a top-level `error`. `environment.clock_locked=false`, `setup_verified`, and `measurement_verified` preserve the evidence.
 
 ## Automated Acceptance Tests
 

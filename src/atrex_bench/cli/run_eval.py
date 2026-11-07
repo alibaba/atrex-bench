@@ -616,7 +616,7 @@ def _resolve_clock_lock_config(
 
     fail_on_deviation = resolved_management["clock_lock_fail_on_deviation"]
     if fail_on_deviation is None:
-        fail_on_deviation = True
+        fail_on_deviation = resolved_management["gpu_clock_mhz"] is not None
     if not isinstance(fail_on_deviation, bool):
         raise ValueError("clock_lock_fail_on_deviation must be a boolean")
 
@@ -4475,7 +4475,7 @@ def main() -> None:
     parser.add_argument(
         "--lock-clocks",
         action="store_true",
-        help="Convenience alias for --clock-lock-mode manage.",
+        help="Manage GPU clocks; default to the assigned GPU's maximum SM frequency.",
     )
     parser.add_argument(
         "--clock-lock-device",
@@ -4486,7 +4486,7 @@ def main() -> None:
         "--gpu-clock-mhz",
         type=int,
         default=None,
-        help="Exact graphics clock in MHz for managed mode.",
+        help="Explicit graphics clock in MHz; defaults to the assigned GPU's maximum.",
     )
     parser.add_argument(
         "--memory-clock-mhz",
