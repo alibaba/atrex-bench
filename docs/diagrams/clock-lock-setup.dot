@@ -1,0 +1,40 @@
+digraph setup {
+  graph [rankdir=TB, bgcolor="white", pad=0.3, nodesep=0.35, ranksep=0.4,
+         fontname="Helvetica", fontsize=20, label="Managed clock lock: worker setup", labelloc=t];
+  node [shape=box, style="rounded,filled", fillcolor="#edf4fb", color="#446683",
+        fontname="Helvetica", fontsize=13, margin="0.16,0.12"];
+  edge [fontname="Helvetica", fontsize=11, color="#536577"];
+  config [label="CLI / JSON / SDK → ClockLockConfig.__post_init__\nOne default: automatic manage → fail_on_deviation=false\nExplicit MHz → true; explicit boolean overrides either default"];
+  worker [label="Each GPU worker: ManagedClockLock.__enter__\nRay CPU driver does not probe GPUs\nInitial applied=false, setup_verified=false,\nmeasurement_verified=null, verified=false, restored=false"];
+  device [label="Save environment + install SIGTERM handler\nResolve selector/device → verify visible GPU UUID\nAcquire UUID-scoped process lock → check idle (if required)"];
+  target [shape=diamond, label="graphics_mhz\nunspecified?"];
+  probe [label="query_max_clock(device): UUID-scoped max SM clock\nreplace() this session's config; retain resolved policy\nPublish requested_graphics_mhz; base config unchanged"];
+  lock [label="lock_graphics → optional lock_memory\nTrack each successful write; publish applied=true\nWait settle_seconds → query_clocks"];
+  snapshot [shape=diamond, label="_verify_snapshot\nGraphics within setup tolerance?\nMemory within tolerance if requested?"];
+  tolerate [shape=diamond, label="Memory passes AND automatic target\nAND fail_on_deviation=false\nAND 0 < observed graphics < target?"];
+  verified [label="setup_verified=true", fillcolor="#e7f4ed"];
+  unverified [label="setup_verified=false\nKeep original target and tolerance", fillcolor="#fff3d8"];
+  enabled [shape=diamond, label="monitor_enabled?"];
+  monitor [label="verified=false until measurement completes\nCreate monitor with resolved target → start monitor"];
+  no_monitor [label="verified=setup_verified\nmeasurement_verified remains null"];
+  run [label="Set managed environment markers → evaluate\nNormal return / body exception / handled SIGTERM\n→ cleanup diagram", fillcolor="#e7f4ed"];
+  error [label="Any setup exception → _cleanup_resources\nThen publish error and re-raise\nBefore writes: no clock reset; applied/restored remain false\nAfter a successful write: reset those clocks, even if\nverification or monitor startup failed", fillcolor="#fceceb"];
+  config -> worker -> device -> target;
+  target -> probe [label="yes"];
+  target -> lock [label="no: explicit target"];
+  probe -> lock -> snapshot;
+  snapshot -> verified [label="both pass"];
+  snapshot -> tolerate [label="mismatch"];
+  tolerate -> unverified [label="yes: downclock only"];
+  tolerate -> error [label="no: strict failure", color="#b34b48"];
+  verified -> enabled;
+  unverified -> enabled;
+  enabled -> monitor [label="yes"];
+  enabled -> no_monitor [label="no"];
+  monitor -> run;
+  no_monitor -> run;
+  device -> error [label="failure", style=dashed, color="#b34b48", constraint=false];
+  probe -> error [label="probe fails: no writes", style=dashed, color="#b34b48", constraint=false];
+  lock -> error [label="write / settle / query fails", style=dashed, color="#b34b48", constraint=false];
+  monitor -> error [label="factory / start fails", style=dashed, color="#b34b48", constraint=false];
+}

@@ -12,6 +12,34 @@
 
 ## Managed Clock Locking
 
+### Lifecycle and failure paths
+
+![Managed clock-lock setup, target discovery, and verification](diagrams/clock-lock-setup.png)
+
+![Managed clock-lock measurement, cleanup, and restoration failures](diagrams/clock-lock-cleanup.png)
+
+The diagrams map to `ClockLockConfig.__post_init__`, `ManagedClockLock.__enter__`,
+`_verify_snapshot`, `_cleanup_monitor`, `_allows_unverified_clock_deviation`,
+`_cleanup_clocks`, `_cleanup_resources`, and `__exit__` in
+[`clock_lock.py`](../src/atrex_bench/eval/clock_lock.py). CLI/JSON resolution in
+[`run_eval.py`](../src/atrex_bench/cli/run_eval.py) passes an unspecified deviation
+policy through to the dataclass, so direct SDK construction shares the same default.
+
+Cleanup runs on normal exit, Python exceptions, and handled SIGTERM; a hard process
+kill cannot execute Python cleanup. Resetting removes this session's applied locks;
+it does not reconstruct a pre-existing external lock. Restoration status is independent
+of frequency verification, so inspect `error`, `verified`, and `restored` together.
+
+Diagram sources: [setup](diagrams/clock-lock-setup.dot) and
+[cleanup](diagrams/clock-lock-cleanup.dot). Regenerate with Graphviz:
+
+```bash
+dot -Tpng docs/diagrams/clock-lock-setup.dot -o docs/diagrams/clock-lock-setup.png
+dot -Tpng docs/diagrams/clock-lock-cleanup.dot -o docs/diagrams/clock-lock-cleanup.png
+```
+
+### Usage
+
 First, query the GPU identity, current usage, and supported clock frequencies on the target machine:
 
 ```bash

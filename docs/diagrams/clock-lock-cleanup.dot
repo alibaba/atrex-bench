@@ -1,0 +1,48 @@
+digraph cleanup {
+  graph [rankdir=TB, bgcolor="white", pad=0.3, nodesep=0.4, ranksep=0.4,
+         fontname="Helvetica", fontsize=20, label="Managed clock lock: measurement and cleanup", labelloc=t];
+  node [shape=box, style="rounded,filled", fillcolor="#edf4fb", color="#446683",
+        fontname="Helvetica", fontsize=13, margin="0.16,0.12"];
+  edge [fontname="Helvetica", fontsize=11, color="#536577"];
+  enter [label="__enter__ failure OR __exit__ (success / body failure)\n_cleanup_resources: shield cleanup from SIGTERM\nAttempt every cleanup stage; collect errors"];
+  started [shape=diamond, label="Monitor started?"];
+  stop [label="_cleanup_monitor: stop and retrieve measurement"];
+  evidence [label="measurement_verified = measurement.verified\nverified = setup_verified AND measurement.verified"];
+  verified [shape=diamond, label="Measurement verified?"];
+  allow [shape=diamond, label="_allows_unverified_clock_deviation?\nfail_on_deviation=false; samples > 0; no forbidden events\nKnown min/max/target; min below runtime lower bound\nmax ≤ upper bound; sole error is graphics downclock"];
+  keep [label="Keep computation result\nmeasurement_verified=false; verified=false\nNo target reduction or tolerance widening", fillcolor="#fff3d8"];
+  fail [label="Record measurement error\nStop exception also sets\nmeasurement_verified=false; verified=false", fillcolor="#fceceb"];
+  clocks [label="_cleanup_clocks (even after measurement error)\nReset each successfully applied graphics / memory lock\nAttempt both resets independently → query post-reset clocks\nNo applied clocks: leave restored unchanged"];
+  reset [shape=diamond, label="Applied clocks:\nall resets + post-reset query succeed?"];
+  restored [label="restored=true\nRecord post_restore_snapshot\nReset removes this session's lock;\ndoes not recreate a prior external lock", fillcolor="#e7f4ed"];
+  restore_error [label="restored=false; record reset/query error\nA successful computation cannot hide cleanup failure", fillcolor="#fceceb"];
+  rest [label="Restore environment → release process lock\n→ restore SIGTERM handler\nContinue after individual cleanup errors"];
+  origin [shape=diamond, label="Setup/body exception\nalready active?"];
+  primary [label="Publish any cleanup errors; preserve primary exception\n__enter__: re-raise (wrap ordinary errors as ClockLockError)\n__exit__: return false; body exception propagates", fillcolor="#fceceb"];
+  clean [shape=diamond, label="Any cleanup error?"];
+  raised [label="Publish error; raise ClockLockError\nReset/query failure: Failed to restore GPU clocks\nOtherwise: GPU clock measurement failed", fillcolor="#fceceb"];
+  success [label="Return evaluation result with accurate evidence\nverified and restored are independent fields", fillcolor="#e7f4ed"];
+  enter -> started;
+  started -> stop [label="yes"];
+  started -> clocks [label="no: no measurement update"];
+  stop -> evidence [label="report returned"];
+  stop -> fail [label="stop exception", color="#b34b48"];
+  evidence -> verified;
+  verified -> clocks [label="yes"];
+  verified -> allow [label="no"];
+  allow -> keep [label="yes"];
+  allow -> fail [label="no: strict / unsafe / incomplete", color="#b34b48"];
+  keep -> clocks;
+  fail -> clocks;
+  clocks -> reset [label="clocks were applied"];
+  clocks -> rest [label="no clocks applied"];
+  reset -> restored [label="yes"];
+  reset -> restore_error [label="no", color="#b34b48"];
+  restored -> rest;
+  restore_error -> rest;
+  rest -> origin;
+  origin -> primary [label="yes"];
+  origin -> clean [label="no"];
+  clean -> raised [label="yes"];
+  clean -> success [label="no"];
+}

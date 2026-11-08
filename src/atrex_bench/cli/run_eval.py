@@ -615,9 +615,7 @@ def _resolve_clock_lock_config(
         )
 
     fail_on_deviation = resolved_management["clock_lock_fail_on_deviation"]
-    if fail_on_deviation is None:
-        fail_on_deviation = resolved_management["gpu_clock_mhz"] is not None
-    if not isinstance(fail_on_deviation, bool):
+    if fail_on_deviation is not None and not isinstance(fail_on_deviation, bool):
         raise ValueError("clock_lock_fail_on_deviation must be a boolean")
 
     return ClockLockConfig(
