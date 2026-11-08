@@ -245,6 +245,24 @@ class NvidiaSmi:
             observed_at=self._now(),
         )
 
+    def query_max_clock(self, device: NvidiaDevice) -> int:
+        """Read this GPU's maximum SM frequency before selecting a lock target."""
+        stdout = self._run([
+            "-i", device.uuid, "--query-gpu=clocks.max.sm",
+            "--format=csv,noheader,nounits",
+        ])
+        try:
+            maximum = int(stdout.strip())
+        except ValueError as error:
+            raise NvidiaClockError(
+                f"Could not read a positive maximum SM clock for {device.uuid}: {stdout!r}"
+            ) from error
+        if maximum <= 0:
+            raise NvidiaClockError(
+                f"Could not read a positive maximum SM clock for {device.uuid}: {stdout!r}"
+            )
+        return maximum
+
     def lock_graphics(self, device: NvidiaDevice, mhz: int) -> None:
         """Lock graphics clocks to one fixed frequency."""
         _validate_clock_mhz(mhz)

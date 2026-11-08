@@ -306,8 +306,15 @@ def _compare_output_tensors(
         # Validate the full physical ABI before selecting defined elements.
         if reference_tensor.dtype != candidate_tensor.dtype:
             return OutputDiff(name=name, passed=False, error="Masked output dtype mismatch")
-        reference_tensor = reference_tensor[defined_mask.to(reference_tensor.device)]
-        candidate_tensor = candidate_tensor[defined_mask.to(candidate_tensor.device)]
+        def select_defined(tensor: torch.Tensor) -> torch.Tensor:
+            mask = defined_mask.to(tensor.device)
+            if tensor.is_floating_point() and tensor.element_size() == 1:
+                # FP8 boolean indexing is unsupported; select bytes without rounding values.
+                return tensor.view(torch.uint8)[mask].view(tensor.dtype)
+            return tensor[mask]
+
+        reference_tensor = select_defined(reference_tensor)
+        candidate_tensor = select_defined(candidate_tensor)
 
     reference_is_discrete = not (
         torch.is_floating_point(reference_tensor) or torch.is_complex(reference_tensor)

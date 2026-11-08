@@ -1667,20 +1667,45 @@ def test_clock_lock_config_loads_managed_json_values() -> None:
     assert config.runtime_tolerance_mhz == 7
 
 
-def test_clock_lock_config_allows_graphics_only_managed_mode() -> None:
+@pytest.mark.parametrize("frequency", [None, 1500])
+def test_clock_lock_config_allows_graphics_only_managed_mode(frequency) -> None:
     from scripts import run_eval as run_eval_module
 
     config = run_eval_module._resolve_clock_lock_config(
-        _clock_lock_args(lock_clocks=True, gpu_clock_mhz=1500),
+        _clock_lock_args(lock_clocks=True, gpu_clock_mhz=frequency),
         {},
     )
 
     assert config.mode == "manage"
-    assert config.graphics_mhz == 1500
+    assert config.graphics_mhz == frequency
     assert config.memory_mhz is None
     assert config.monitor_enabled is True
     assert config.sample_interval_ms == 10
     assert config.runtime_tolerance_mhz == 0
+    assert config.fail_on_deviation is (frequency is not None)
+
+
+@pytest.mark.parametrize("frequency", [None, 1500])
+@pytest.mark.parametrize("policy", [None, True, False])
+def test_clock_lock_deviation_policy_matches_sdk(frequency, policy) -> None:
+    from atrex_bench.eval.clock_lock import ClockLockConfig
+    from scripts import run_eval as run_eval_module
+
+    sdk = ClockLockConfig(mode="manage", graphics_mhz=frequency, fail_on_deviation=policy)
+    cli = run_eval_module._resolve_clock_lock_config(
+        _clock_lock_args(
+            lock_clocks=True, gpu_clock_mhz=frequency,
+            clock_lock_fail_on_deviation=policy,
+        ),
+        {},
+    )
+    configured = run_eval_module._resolve_clock_lock_config(
+        _clock_lock_args(),
+        {"clock_lock_mode": "manage", "gpu_clock_mhz": frequency,
+         "clock_lock_fail_on_deviation": policy},
+    )
+    assert cli.fail_on_deviation is sdk.fail_on_deviation
+    assert configured.fail_on_deviation is sdk.fail_on_deviation
 
 
 def test_clock_lock_cli_values_override_json() -> None:
@@ -1760,6 +1785,8 @@ def test_management_settings_require_manage_mode(mode: str) -> None:
     ("field", "value", "expected_error"),
     [
         ("clock_lock_monitor", 1, "must be a boolean"),
+        ("clock_lock_fail_on_deviation", 1, "must be a boolean"),
+        ("clock_lock_fail_on_deviation", "false", "must be a boolean"),
         ("clock_lock_sample_interval_ms", 0, "positive integer"),
         ("clock_lock_runtime_tolerance_mhz", -1, "non-negative integer"),
     ],

@@ -457,3 +457,44 @@ def test_invalid_metadata_l2_is_rejected(tmp_path, bound):
 
     assert result.status == "failed"
     assert "max_rel_l2" in result.reason
+
+
+@pytest.mark.parametrize(
+    "dtype_name", ["float8_e4m3fn", "float8_e4m3fnuz", "float8_e5m2", "float8_e5m2fnuz"]
+)
+@pytest.mark.parametrize("layout", ["contiguous", "transposed", "strided"])
+def test_defined_fp8_outputs_preserve_values_and_ignore_padding(monkeypatch, dtype_name, layout):
+    import torch
+
+    from atrex_bench.eval.correctness import _compare_output_tensors
+
+    dtype = getattr(torch, dtype_name)
+    original_getitem = torch.Tensor.__getitem__
+
+    def getitem_without_fp8_mask(tensor, index):
+        if tensor.dtype == dtype and isinstance(index, torch.Tensor) and index.dtype == torch.bool:
+            raise RuntimeError("FP8 boolean indexing is unavailable on this backend")
+        return original_getitem(tensor, index)
+
+    monkeypatch.setattr(torch.Tensor, "__getitem__", getitem_without_fp8_mask)
+    reference = torch.full((4, 6), 0.5, dtype=dtype)
+    candidate = reference.clone()
+    if layout == "transposed":
+        reference, candidate = reference.T, candidate.T
+    elif layout == "strided":
+        reference, candidate = reference[:, ::2], candidate[:, ::2]
+    mask = torch.ones(reference.shape, dtype=torch.bool)
+    mask[0, 0] = False
+    nan_bits = torch.tensor(float("nan"), dtype=dtype).view(torch.uint8).item()
+    candidate.view(torch.uint8)[0, 0] = nan_bits
+
+    def compare(atol=0.0):
+        return _compare_output_tensors(reference, candidate, name="output", atol=atol,
+                                       rtol=0.0, strict_dtype=True, defined_mask=mask)
+
+    assert compare().passed
+    candidate.view(torch.uint8)[1, 0] += 1
+    assert not compare().passed
+    assert compare(atol=0.2).passed
+    candidate.view(torch.uint8)[1, 0] = nan_bits
+    assert not compare().passed
