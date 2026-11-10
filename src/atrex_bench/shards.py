@@ -10,6 +10,7 @@ from functools import lru_cache
 from pathlib import Path
 
 SHAPE_SHARD_SCHEMA_VERSION = "v1"
+_CLOCK_OBSERVATIONS = ("clock_locked", "clock_lock_detected", "clock_lock_verified")
 
 
 @lru_cache(maxsize=1)
@@ -118,6 +119,18 @@ def _compatibility(result: Mapping[str, object]) -> dict[str, object]:
     selection = result["shape_selection"]
     config = dict(result["runner_config"])
     config.pop("shape_ids", None)
+    environment = _environment_identity(result["environment"])
+    for key in ("driver_version", *_CLOCK_OBSERVATIONS):
+        environment.pop(key, None)
+    name = environment.get("gpu_name")
+    if isinstance(name, str):
+        # Ignore spelling differences while retaining model and capacity qualifiers.
+        parts = name.casefold().replace("-", " ").split()
+        if parts and parts[0] == "nvidia":
+            parts = parts[1:]
+        environment["gpu_name"] = " ".join(parts)
+    if "clock_lock" in environment:
+        environment["clock_lock"].pop("verified")
     return {
         "shape_selection": {
             key: value
@@ -125,11 +138,7 @@ def _compatibility(result: Mapping[str, object]) -> dict[str, object]:
             if key not in {"selected_shape_ids", "input_seeds", "partial"}
         },
         "runner_config": config,
-        "environment": {
-            key: value
-            for key, value in _environment_identity(result["environment"]).items()
-            if key != "driver_version"
-        },
+        "environment": environment,
         "kernel": result["kernel"],
         "dsl": result["dsl"],
         "eval_mode": result["eval_mode"],
@@ -137,16 +146,14 @@ def _compatibility(result: Mapping[str, object]) -> dict[str, object]:
 
 
 def _environment_identity(environment: Mapping[str, object]) -> dict[str, object]:
-    """Compare hardware/toolchain and clock targets, excluding device identity/traces."""
+    """Select aggregate environment fields without device identity or traces."""
     fields = {
         "gpu_name",
         "gpu_arch",
         "accelerator_backend",
         "PTL_STATE",
-        "clock_locked",
-        "clock_lock_detected",
+        *_CLOCK_OBSERVATIONS,
         "clock_lock_source",
-        "clock_lock_verified",
     }
     stable = {
         key: value
@@ -160,6 +167,26 @@ def _environment_identity(environment: Mapping[str, object]) -> dict[str, object
             for key in ("mode", "source", "requested", "fail_on_deviation", "verified", "restored")
         }
     return stable
+
+
+def _all_observed(values: Sequence[object]) -> bool | None:
+    if all(value is None for value in values):
+        return None
+    return all(value is True for value in values)
+
+
+def _merge_environments(environments: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    merged = _environment_identity(environments[0])
+    # Individual driver versions remain in shard_evaluations.
+    merged["driver_version"] = None
+    for key in _CLOCK_OBSERVATIONS:
+        if any(key in env for env in environments):
+            merged[key] = _all_observed([env.get(key) for env in environments])
+    if "clock_lock" in merged:
+        merged["clock_lock"]["verified"] = _all_observed([
+            env["clock_lock"].get("verified") for env in environments
+        ])
+    return merged
 
 
 def _merge_shape_blocks(results, path, all_ids):
@@ -337,11 +364,7 @@ def merge_evaluation_shards(
             }
             for result in results
         ]
-        merged["environment"] = _environment_identity(first["environment"])
-        # A distributed report has no single host driver. Keep the exact values
-        # in shard_evaluations, including when this run happens to use one version.
-        # The aggregate identity then stays stable when later runs use other nodes.
-        merged["environment"]["driver_version"] = None
+        merged["environment"] = _merge_environments([result["environment"] for result in results])
         from atrex_bench.cli.run_eval import _aggregate_abba_runs, _eval_id
 
         merged["eval_id"] = _eval_id()
