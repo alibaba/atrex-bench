@@ -116,6 +116,11 @@ remain failed in the merged report. ABBA merging combines corresponding legs
 and recomputes the overall geometric means from all shapes; it never averages
 shard speedups. `shard_evaluations` preserves each source eval ID, selection,
 and full environment evidence. The resulting `shape_selection.partial` is false.
+GPU name matching ignores case, spacing, hyphen separators, and the optional
+`NVIDIA` prefix. Model and capacity qualifiers still need to match. Clock
+verification can vary by GPU when targets and clock policy agree. The merged
+verification is true only when every shard verifies, and each shard retains its
+original name and clock report, including measurements and restoration status.
 Driver versions may differ across Ray nodes: each shard retains its exact
 `environment.driver_version`; the merged value is always `null` because it has
 no single host driver, including when all selected nodes share a version. This

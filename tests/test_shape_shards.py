@@ -219,6 +219,60 @@ def test_different_devices_allowed_with_same_clock_targets(evaluator):
         merge_evaluation_shards([first, second])
 
 
+def test_gpu_name_formatting_keeps_original_shard_environments(evaluator):
+    evaluate, _, _, _ = evaluator
+    first, second = evaluate(["10", "31"]), evaluate(["2"])
+    first["environment"]["gpu_name"] = "NVIDIA RTX PRO 5000 72GB Blackwell"
+    second["environment"]["gpu_name"] = "  rtx-pro-5000 72GB blackwell  "
+
+    merged = merge_evaluation_shards([first, second])
+
+    assert [shard["environment"] for shard in merged["shard_evaluations"]] == [
+        first["environment"], second["environment"],
+    ]
+    assert merged["environment"]["gpu_name"] == first["environment"]["gpu_name"]
+    assert merged["performance"]["shapes"]["2"] == second["performance"]["shapes"]["2"]
+
+    second["environment"]["gpu_name"] = "NVIDIA RTX PRO 5000 48GB Blackwell"
+    with pytest.raises(ValueError, match=r"environment\.gpu_name"):
+        merge_evaluation_shards([first, second])
+
+
+@pytest.mark.parametrize("verified", [(True, False), (False, True), (True, True)])
+def test_shard_clock_verification_is_aggregated_without_losing_evidence(evaluator, verified):
+    evaluate, _, _, _ = evaluator
+    first, second = evaluate(["10", "31"]), evaluate(["2"])
+    for shard, status in zip((first, second), verified):
+        shard["environment"].update(
+            clock_locked=status,
+            clock_lock_detected=status,
+            clock_lock_verified=status,
+            clock_lock={
+                "mode": "manage",
+                "source": "atrex-managed",
+                "requested": {"graphics_mhz": 3090},
+                "fail_on_deviation": False,
+                "verified": status,
+                "restored": True,
+                "measurement": {"graphics_min_mhz": 3090 if status else 2580},
+            },
+        )
+
+    merged = merge_evaluation_shards([first, second])
+    env = merged["environment"]
+    assert env["clock_lock"]["verified"] is all(verified)
+    assert env["clock_locked"] is all(verified)
+    assert env["clock_lock_detected"] is all(verified)
+    assert env["clock_lock_verified"] is all(verified)
+    assert [shard["environment"] for shard in merged["shard_evaluations"]] == [
+        first["environment"], second["environment"],
+    ]
+
+    second["environment"]["clock_lock"]["restored"] = False
+    with pytest.raises(ValueError, match=r"environment\.clock_lock"):
+        merge_evaluation_shards([first, second])
+
+
 @pytest.mark.parametrize(
     "versions",
     [("580.126.09", "580.95.05"), ("580.126.09", "580.126.09"), (None, "580.126.09")],
